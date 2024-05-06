@@ -3,7 +3,7 @@ mod accounts;
 mod rooms;
 
 use poem::{
-    get, handler, http::StatusCode, middleware::AddData, patch, post, EndpointExt, Request, Route
+    get, handler, http::StatusCode, middleware::{ AddData, Cors } , patch, post, EndpointExt, Request, Route, Response
 };
 use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
@@ -59,6 +59,7 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/accounts/:id", get(accounts::login).post(accounts::register))
             .at("/api/rooms/", post(rooms::create_room))
             .at("/api/rooms/:id", patch(edit_room))
+            .with(Cors::new().allow_origin("*"))
             .with(AddData::new(Arc::new(db)))
             .with(AddData::new(Arc::new(RwLock::new(HashMap::<String, rooms::Room>::new()))));
             Ok(app.into())

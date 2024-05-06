@@ -45,7 +45,6 @@ pub async fn register(Path(id): Path<String>, req: &Request, db: Data<&Arc<Datab
     };
     Response::builder()
     .status(status)
-    .header("Access-Control-Allow-Origin", "*")
     .body("")
 }
 
