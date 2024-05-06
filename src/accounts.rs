@@ -11,13 +11,13 @@ use entities::prelude as tables;
 use sha256;
 
 #[handler]
-pub async fn register(Path(id): Path<String>, req: &Request, db: Data<&Arc<DatabaseConnection>>) -> StatusCode {
+pub async fn register(Path(id): Path<String>, req: &Request, db: Data<&Arc<DatabaseConnection>>) -> Response {
     let db = db.deref().as_ref();
     let password = match req.header("password") {
         Some(password) => Some(sha256::digest(password).to_ascii_uppercase()),
         None => None,
     };
-    match tables::Accounts::insert(
+    let status = match tables::Accounts::insert(
         entities::accounts::ActiveModel {
             login: Set(id.clone()),
             password: Set(password),
@@ -42,7 +42,11 @@ pub async fn register(Path(id): Path<String>, req: &Request, db: Data<&Arc<Datab
                 _ => StatusCode::BAD_GATEWAY,
             }
         },
-    }
+    };
+    Response::builder()
+    .status(status)
+    .header("Access-Control-Allow-Origin", "*")
+    .body("")
 }
 
 #[handler]
