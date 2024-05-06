@@ -59,7 +59,7 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/accounts/:id", get(accounts::login).post(accounts::register))
             .at("/api/rooms/", post(rooms::create_room))
             .at("/api/rooms/:id", patch(edit_room))
-            .with(Cors::new().allow_origin("*"))
+            .with(Cors::new())
             .with(AddData::new(Arc::new(db)))
             .with(AddData::new(Arc::new(RwLock::new(HashMap::<String, rooms::Room>::new()))));
             Ok(app.into())
