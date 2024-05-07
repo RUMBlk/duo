@@ -1,114 +1,72 @@
 use poem::{
     handler, http::StatusCode, web::{
-        Data, Form, Json, Path
-    }, Response, Request,
+        Data, Path, Json
+    }, Response,
 };
-use serde::Deserialize;
-use sea_orm::{prelude::Uuid, ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set, TryInsertResult};
+use sea_orm::{prelude::Uuid, DatabaseConnection, DbErr, TryInsertResult};
 use std::{ops::Deref, sync::Arc};
-use super::database::entities;
-use entities::prelude as tables;
+use crate::database::queries;
 use sha256;
+use serde::Deserialize;
 
+#[derive(Debug, Deserialize)]
+struct Register {
+    password: Option<String>,
+}
 #[handler]
-pub async fn register(Path(id): Path<String>, req: &Request, db: Data<&Arc<DatabaseConnection>>) -> Response {
+pub async fn register(Path(id): Path<String>, req: Json<Register>, db: Data<&Arc<DatabaseConnection>>) -> Result<StatusCode, StatusCode> {
     let db = db.deref().as_ref();
-    let password = match req.header("password") {
-        Some(password) => Some(sha256::digest(password).to_ascii_uppercase()),
-        None => None,
-    };
-    let status = match tables::Accounts::insert(
-        entities::accounts::ActiveModel {
-            login: Set(id.clone()),
-            password: Set(password),
-            display_name: Set(id.clone()),
-            ..Default::default()
-        },
-    )
-    .on_conflict(sea_orm::sea_query::OnConflict::column(entities::accounts::Column::Id).do_nothing().to_owned())
-    .do_nothing()
+    let password = req.password.clone().and_then(|password| Some(sha256::digest(password).to_ascii_uppercase()));
+    match queries::accounts::register(id, password)
     .exec(db)
-    .await {
-        Ok(result) => {
-            match result {
-                TryInsertResult::Inserted(_) => StatusCode::CREATED,
-                TryInsertResult::Conflicted => StatusCode::CONFLICT,
-                TryInsertResult::Empty => StatusCode::BAD_REQUEST,
-            }
-        },
-        Err(e) => { 
-            match e {
-                DbErr::Query(_) => StatusCode::CONFLICT,
-                _ => StatusCode::BAD_GATEWAY,
-            }
-        },
-    };
-    Response::builder()
-    .status(status)
-    .body("")
+    .await
+    .map_err(|e| match e {
+        DbErr::Query(_) => StatusCode::CONFLICT,
+        _ => StatusCode::BAD_GATEWAY,
+    })? {
+        TryInsertResult::Inserted(_) => Ok(StatusCode::CREATED),
+        TryInsertResult::Conflicted => Err(StatusCode::CONFLICT),
+        TryInsertResult::Empty => Err(StatusCode::BAD_REQUEST),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Login {
+    password: String,
+}
+#[handler]
+pub async fn login(Path(id): Path<String>, req: Json<Login>, db: Data<&Arc<DatabaseConnection>>) -> Result<Response, StatusCode> {
+    let db = db.deref().as_ref();
+    let password = sha256::digest(req.password.clone()).to_ascii_uppercase();
+    let uuid = Uuid::try_parse(&id).unwrap_or_default();
+    let account = queries::accounts::by_uuid_or_login(id, uuid)
+    .one(db)
+    .await
+    .map_err(|_| StatusCode::BAD_GATEWAY)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if account.password == Some(password) {
+        let token = Uuid::new_v4();
+        match queries::sessions::create(account.id, token)
+        .exec(db)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)? {
+            TryInsertResult::Inserted(_) => Ok(token.to_string()),
+            TryInsertResult::Conflicted => Err(StatusCode::CONFLICT),
+            _ => Err(StatusCode::BAD_REQUEST),
+        }
+    } else { Err(StatusCode::FORBIDDEN) }
+        .map(|token| Response::builder().body(token))
 }
 
 #[handler]
-pub async fn login(Path(id): Path<String>, req: &Request, db: Data<&Arc<DatabaseConnection>>) -> Result<Response, StatusCode> {
+pub async fn exist_checker(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> Result<StatusCode, StatusCode> {
     let db = db.deref().as_ref();
-    let response = match req.header("password") {
-        Some(password) => {
-            let password = sha256::digest(password).to_ascii_uppercase();
-            let uuid = Uuid::try_parse(&id).unwrap_or_default();
-            match tables::Accounts::find()
-            .filter(
-                Condition::any()
-                    .add(entities::accounts::Column::Login.eq(id))
-                    .add(entities::accounts::Column::Uuid.eq(uuid))
-            )
-            .one(db)
-            .await {
-                Ok(account) => {
-                    match account {
-                        Some(account) => {
-                            if account.password == Some(password) {
-                                let token = Uuid::new_v4();
-                                match tables::Sessions::insert(
-                                    entities::sessions::ActiveModel {
-                                        account: Set(account.id),
-                                        token: Set(token),
-                                        ..Default::default()
-                                    },
-                                )
-                                .on_conflict(sea_orm::sea_query::OnConflict::column(entities::sessions::Column::Id).do_nothing().to_owned())
-                                .do_nothing()
-                                .exec(db)
-                                .await {
-                                    Ok(result) => {
-                                        match result {
-                                            TryInsertResult::Inserted(_) => Ok(token.to_string()),
-                                            TryInsertResult::Conflicted => Err(StatusCode::CONFLICT),
-                                            TryInsertResult::Empty => Err(StatusCode::BAD_REQUEST),
-                                        }
-                                    },
-                                    Err(_) => Err(StatusCode::BAD_GATEWAY),
-                                }
-                            } else {
-                                Err(StatusCode::FORBIDDEN)
-                            }
-                        },
-                        None => Err(StatusCode::NOT_FOUND),
-                    }
-                },
-                Err(_) => Err(StatusCode::BAD_GATEWAY),
-            }
-        },
-        None => Err(StatusCode::BAD_REQUEST),
-    };
-
-    let status = match response {
-        Ok(_) => StatusCode::OK,
-        Err(e) => e, 
-    };
-
-    Ok(
-        Response::builder()
-        .status(status)
-        .body(response.unwrap_or_default())
-    )
+    let uuid = Uuid::try_parse(&id).unwrap_or_default();
+    queries::accounts::by_uuid_or_login(id, uuid)
+    .one(db)
+    .await
+    .map_err(|_| StatusCode::BAD_GATEWAY)?
+    .ok_or(StatusCode::NOT_FOUND)
+    .map(|_| StatusCode::OK)
 }

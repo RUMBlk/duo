@@ -3,7 +3,7 @@ mod accounts;
 mod rooms;
 
 use poem::{
-    get, handler, http::StatusCode, middleware::{ AddData, Cors } , patch, post, EndpointExt, Request, Route, Response
+    get, handler, head, middleware::{ AddData, Cors }, post, EndpointExt, Route
 };
 use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
@@ -13,21 +13,6 @@ use std::collections::HashMap;
 #[handler]
 fn hello_world() -> &'static str {
     "Hello, world!"
-}
-
-#[handler]
-async fn join_room(token: String, roomcode: String) -> StatusCode {
-    StatusCode::OK
-}
-
-#[handler]
-async fn leave_room(token: String) -> StatusCode {
-    StatusCode::OK
-}
-
-#[handler]
-async fn edit_room(request: &Request) -> StatusCode {
-    StatusCode::OK
 }
 
 #[shuttle_runtime::main]
@@ -56,9 +41,12 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
         Ok(db) => {
             let app = Route::new()
             .at("/api/hello_world/", get(hello_world))
-            .at("/api/accounts/:id", get(accounts::login).post(accounts::register))
-            .at("/api/rooms/", post(rooms::create_room))
-            .at("/api/rooms/:id", patch(edit_room))
+            .at("/api/accounts/:id", head(accounts::exist_checker).post(accounts::register))
+            .at("/api/accounts/:id/sessions", post(accounts::login))
+            .at("/api/rooms/", post(rooms::create))
+            .at("/api/rooms/:id/", get(rooms::listener))
+            .at("/api/rooms/:id/join", get(rooms::join))
+            .at("/api/rooms/:id/leave", get(rooms::leave))
             .with(Cors::new())
             .with(AddData::new(Arc::new(db)))
             .with(AddData::new(Arc::new(RwLock::new(HashMap::<String, rooms::Room>::new()))));

@@ -1,144 +1,180 @@
+use futures_util::SinkExt;
 use poem::{
-    handler, http::StatusCode, web::{
-        Data, Form, Json, Path
-    }, Response
+    handler, http::StatusCode, web::{ websocket::{Message, WebSocket }, Data, Json, Path }, IntoResponse, Request, Response
 };
 use serde::{ Serialize, Deserialize };
 use serde_json;
-use sea_orm::{prelude::Uuid, sea_query::table, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set, TryInsertResult};
+use sea_orm::{prelude::Uuid, DatabaseConnection};
 use std::{collections::HashMap, ops::Deref, sync::{ Arc, RwLock }, };
-use super::database::entities;
-use entities::prelude as tables;
+use crate::database::queries;
+use tokio::sync::broadcast;
+
 use random_string;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Room {
+    id: String,
     public: bool,
     password: Option<String>,
     owner: usize,
     max_players: u8,
-    players: Vec<Uuid>
+    players: Vec<Uuid>,
+    #[serde(skip)]
+    broadcaster: Option<broadcast::Sender<String>>,
 }
 
 impl Room {
     pub fn new(public: bool, password: Option<String>, owner: Uuid, max_players: u8) -> Self {
-        Self { public, password, owner: 0, max_players, players: vec![owner] }
+        let id = random_string::generate(6, "0123456789XE");
+        let broadcaster = Some(broadcast::channel(12).0);
+        Self {id, broadcaster, public: public, password, owner: 0, max_players, players: vec![owner] }
+    }
+
+    pub fn set_owner(&mut self, id: usize) -> Result<(), ()> {
+        if id >= self.players.len() { Err(()) }
+        else { self.owner = id; Ok(()) }
     }
 }
 
+pub async fn room_env<F, T>(db: &DatabaseConnection, auth: Uuid, rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>, id: String, closure: F) -> Result<T, StatusCode>
+where F: Fn(Uuid, &mut Room) -> Result<T, StatusCode>
+{
+    let player_id = queries::sessions::get_account_uuid(auth).one(db).await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    let mut rooms = rooms.write().unwrap();
+    let room = rooms
+        .get_mut(&id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let result = closure(player_id, room);
+    if let Some(broadcaster) = &room.broadcaster {
+        let _ = broadcaster.send(serde_json::to_string(&room).expect("Failed to serialize Room"));
+    }
+    if room.players.len() == 0 { rooms.remove(&id); }
+    drop(rooms);
+    result
+}
+
+#[handler]
+pub async fn listener(
+    Path(id): Path<String>,
+    ws: WebSocket,
+    rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>
+) -> Result<impl IntoResponse, StatusCode> {
+    let mut rooms = rooms.write().unwrap();
+    let room = rooms.get(&id).ok_or(StatusCode::NOT_FOUND)?;
+    let sender = room.broadcaster.as_ref().unwrap().clone();
+    drop(rooms);
+    let mut receiver = sender.subscribe();
+    Ok(ws.on_upgrade(move |mut socket| async move {
+        tokio::spawn(async move {
+            while let Ok(room) = receiver.recv().await {
+                let message = Message::Text(room);
+                let _ = socket.send(message);
+            }
+        });
+    }))
+}
+
 #[derive(Deserialize)]
-struct CreateRoom {
-    token: String,
+struct RoomForm {
     public: Option<bool>,
     password: Option<String>,
-    max_players: u8,
+    max_players: Option<u8>,
+    owner: Option<usize>,
 }
 
 #[handler]
-pub async fn create_room(Form(request): Form<CreateRoom>, db: Data<&Arc<DatabaseConnection>>, rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>) -> Result<Response, StatusCode> {
+pub async fn create(
+    main: &Request,
+    req: Json<RoomForm>,
+    db: Data<&Arc<DatabaseConnection>>,
+    rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>
+) -> Result<Json<Room>, StatusCode> {
+    let auth = Uuid::parse_str(
+        main.header("authorization")
+        .ok_or(StatusCode::BAD_REQUEST)?
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let db = db.deref().as_ref();
-    let response = match tables::Sessions::find()
-    .filter(entities::sessions::Column::Token.eq(request.token))
-    .select_only()
-    .column(entities::sessions::Column::Account)
-    .into_tuple::<i64>()
-    .one(db)
-    .await {
-        Ok(id) => {
-            match id {
-                Some(id) => {
-                    match tables::Accounts::find_by_id(id).one(db).await {
-                        Ok(account) => {
-                            match account {
-                                Some(account) => {
-                                    let mut rooms = rooms.write().unwrap();
-                                    let room = Room::new(request.public.unwrap_or(false), request.password, account.uuid, request.max_players);
-                                    let room_json = serde_json::to_string(&room).expect("Failed to serialize room data");
-                                    rooms.insert(random_string::generate(6, "0123456789XE"), room);
-                                    drop(rooms);
-                                    Ok(room_json)
-                                },
-                                None => Err(StatusCode::NOT_FOUND),
-                            }
-                        },
-                        Err(_) => Err(StatusCode::BAD_GATEWAY),
-                    }
-                },
-                None => Err(StatusCode::FORBIDDEN),
-            }
-        },
-        Err(_) => Err(StatusCode::BAD_GATEWAY),
-    };
+    let player_id = queries::sessions::get_account_uuid(auth).one(db).await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .ok_or(StatusCode::FORBIDDEN)?;
 
-    let status = match response {
-        Ok(_) => StatusCode::OK,
-        Err(e) => e, 
-    };
+    let mut rooms = rooms.write().unwrap();
+    let room = Room::new(req.public.unwrap_or(false), req.password.clone(), player_id, req.max_players.unwrap_or(2));
+    let json = Json(room.clone());
+    rooms.insert(room.id.clone(), room);
+    drop(rooms);
 
-    Ok(
-        Response::builder()
-        .status(status)
-        .body(response.unwrap_or_default())
+    Ok(json)
+}
+
+#[handler]
+pub async fn join(
+    Path(id): Path<String>,
+    main: &Request,
+    req: Json<RoomForm>,
+    db: Data<&Arc<DatabaseConnection>>,
+    rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>
+) -> Result<Response, StatusCode> {
+    let auth = Uuid::parse_str(
+        main.header("authorization")
+        .ok_or(StatusCode::BAD_REQUEST)?
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let db = db.deref().as_ref();
+    let json = room_env(db, auth, rooms, id, |player_id, room| {
+        if req.password != room.password {
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        room.players.push(player_id);
+        let json = serde_json::to_string(&room)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+        json
+    }).await?;
+
+    Ok(Response::builder()
+        .body(json)
         .set_content_type("application/json")
     )
 }
 
-#[derive(Deserialize)]
-struct JoinRoom {
-    token: String,
-    room: String,
-    password: Option<String>,
+#[handler]
+pub async fn leave(
+    Path(id): Path<String>,
+    req: &Request,
+    db: Data<&Arc<DatabaseConnection>>,
+    rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>
+) -> Result<StatusCode, StatusCode> {
+    let auth = Uuid::parse_str(
+        req.header("authorization")
+        .ok_or(StatusCode::BAD_REQUEST)?
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let db = db.deref().as_ref();
+    room_env(db, auth, rooms, id, |player_id, room| {
+        room.players.retain(|item| *item != player_id);
+        Ok(StatusCode::OK)
+    }).await
 }
 
 #[handler]
-pub async fn join_room(Form(request): Form<JoinRoom>, db: Data<&Arc<DatabaseConnection>>, rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>) -> Result<Response, StatusCode> {
+pub async fn edit(Path(id): Path<String>, main: &Request, req: Json<RoomForm>, db: Data<&Arc<DatabaseConnection>>, rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>) -> Result<Json<Room>, StatusCode> {
+    let auth = Uuid::parse_str(
+        main.header("authorization")
+        .ok_or(StatusCode::BAD_REQUEST)?
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let db = db.deref().as_ref();
-    let response = match tables::Sessions::find()
-    .filter(entities::sessions::Column::Token.eq(request.token))
-    .select_only()
-    .column(entities::sessions::Column::Account)
-    .into_tuple::<i64>()
-    .one(db)
-    .await {
-        Ok(id) => {
-            match id {
-                Some(id) => {
-                    match tables::Accounts::find_by_id(id).one(db).await {
-                        Ok(account) => {
-                            match account {
-                                Some(account) => {
-                                    let mut rooms = rooms.write().unwrap();
-                                    let result = match rooms.get_mut(&request.room) {
-                                        Some(room) => {
-                                            room.players.push(account.uuid);
-                                            Ok(serde_json::to_string(&room).expect("Failed to serialize room data"))
-                                        },
-                                        None => Err(StatusCode::NOT_FOUND),
-                                    };
-                                    drop(rooms);
-                                    result
-                                },
-                                None => Err(StatusCode::NOT_FOUND),
-                            }
-                        },
-                        Err(_) => Err(StatusCode::BAD_GATEWAY),
-                    }
-                },
-                None => Err(StatusCode::FORBIDDEN),
-            }
-        },
-        Err(_) => Err(StatusCode::BAD_GATEWAY),
-    };
-
-    let status = match response {
-        Ok(_) => StatusCode::OK,
-        Err(e) => e, 
-    };
-
-    Ok(
-        Response::builder()
-        .status(status)
-        .body(response.unwrap_or_default())
-        .set_content_type("application/json")
-    )
+    room_env(db, auth, rooms, id, move |_player_id, room| {
+        if let Some(public) = req.public { room.public = public; };
+        room.password = req.password.clone();
+        if let Some(max_players) = req.max_players { room.max_players = max_players; }
+        if let Some(owner) = req.owner { let _ = room.set_owner(owner); }
+        Ok(Json(room.deref().to_owned()))
+    }).await
 }
