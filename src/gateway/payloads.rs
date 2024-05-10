@@ -1,38 +1,27 @@
-use futures_util::SinkExt;
-use poem::{
-    handler, http::StatusCode, web::{ self, websocket::{Message, WebSocket }, Data, Json, Path }, IntoResponse, Request, Response
-};
 use serde::{ Serialize, Deserialize };
 use serde_json;
-use sea_orm::{prelude::Uuid, DatabaseConnection, Iden};
-use std::{collections::HashMap, ops::Deref };
-use crate::{auth, database::queries, game::room::{self, Room}};
-use tokio::sync::broadcast;
-use futures_util::StreamExt;
-use sea_orm::prelude::DateTime;
+use sea_orm::prelude::Uuid;
+use crate::game::rooms::{self, Room};
 use sea_orm::prelude::DateTimeWithTimeZone;
 use crate::database::entities;
 
-use random_string;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Payload {
+    //From Server
     OK,
     Error(Error),
-    #[serde(skip_deserializing)]
     Hello(Hello),
+    RoomReturn(RoomReturn),
+    RoomNewPlayer(RoomNewPlayer),
+    RoomPlayerLeft(RoomPlayerLeft),
+    //From Server/Client
     Identify(Identify),
     Identity(Identity),
-    RoomCreate(String, Room),
-    #[serde(skip_deserializing)]
-    RoomCreateWithPlayers(String, Room, room::Players),
-    #[serde(skip_deserializing)]
-    RoomUpdate(String, RoomUpdate),
-    RoomUpdateResult(RoomUpdateResult),
+    RoomCreate(RoomCreate),
+    RoomUpdate(RoomUpdate),
+    //From Client
     RoomJoin(RoomJoin),
-    RoomJoined(Uuid),
     RoomLeave(String),
-    RoomLeft(Uuid),
 }
 
 impl Payload {
@@ -98,8 +87,8 @@ impl From<entities::accounts::Model> for Identity {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RoomUpdate {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RoomForm {
     name: Option<String>,
     is_public: Option<bool>,
     password: Option<String>,
@@ -107,70 +96,158 @@ pub struct RoomUpdate {
     max_players: Option<usize>,
 }
 
+impl From<Room> for RoomForm {
+    fn from(value: Room) -> Self {
+        Self {
+            name: Some(value.name()),
+            is_public: Some(value.is_public),
+            password: value.password(),
+            owner: Some(value.owner()),
+            max_players: Some(value.max_players()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RoomCreate {
+    id: Option<String>,
+    #[serde(flatten)]
+    room_form: RoomForm,
+}
+
+impl RoomCreate {
+    pub fn from_room(id: String, room: Room) -> Self {
+        Self {
+            id: Some(id),
+            room_form: RoomForm::from(room),
+        }
+    }
+
+    pub fn create_room(&self, owner: Uuid) -> Room {
+        Room::new(
+            self.room_form.name.clone(),
+            Some(self.room_form.is_public.unwrap_or(false)),
+            self.room_form.password.clone(),
+            owner,
+            self.room_form.max_players
+        )
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RoomUpdate {
+    id: String,
+    #[serde(flatten)]
+    room_form: RoomForm,
+}
+
 impl RoomUpdate {
-    pub fn apply(&mut self, room: &mut Room) -> RoomUpdateResult {
-        let name = self.name.as_ref().and_then(|name| {
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    pub fn apply_update(&mut self, room: &mut Room) -> RoomReturn {
+        let mut applied = self.clone();
+        let name = self.room_form.name.as_ref().and_then(|name| {
             Some(room.set_name(name.clone()))
         });
-        if let Some(Err(_)) = name { self.name = None };
-        let is_public = self.is_public.and_then(|is_public| {
+        if let Some(Err(_)) = name { applied.room_form.name = None };
+        let is_public = self.room_form.is_public.and_then(|is_public| {
             room.is_public = is_public;
-            Some(Ok(room::ReturnCode::OK))
+            Some(Ok(rooms::ReturnCode::OK))
         });
-        let password = self.password.as_ref().and_then(|password| {
+        let password = self.room_form.password.as_ref().and_then(|password| {
             let password = if password.is_empty() {
                 None
             } else { Some(password) };
             Some(room.set_password(password.cloned()))
         });
-        if let Some(Err(_)) = password { self.password = None };
-        let owner = self.owner.and_then(|player_id| {
+        if let Some(Err(_)) = password { applied.room_form.password = None };
+        let owner = self.room_form.owner.and_then(|player_id| {
             Some(room.set_owner(player_id))
         });
-        if let Some(Err(_)) = owner { self.owner = None };
-        let max_players = self.max_players.and_then(|max_players| {
+        if let Some(Err(_)) = owner { applied.room_form.owner = None };
+        let max_players = self.room_form.max_players.and_then(|max_players| {
             Some(room.set_max_players(max_players))
         });
-        if let Some(Err(_)) = max_players { self.max_players = None };
-        RoomUpdateResult::new(name, is_public, password, owner, max_players)
+        if let Some(Err(_)) = max_players { applied.room_form.max_players = None };
+        room.announce(Payload::RoomUpdate(applied).to_json_string());
+        RoomReturn::new(name, is_public, password, owner, max_players)
     }
 }
 
-type RoomResult = Option<Result<room::ReturnCode, room::ReturnCode>>;
+
+type RoomResult = Option<Result<rooms::ReturnCode, rooms::ReturnCode>>;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RoomUpdateResult {
+pub struct RoomReturn {
     name: RoomResult,
-    public: RoomResult,
+    is_public: RoomResult,
     password: RoomResult,
     owner: RoomResult,
     max_players: RoomResult,
 }
 
-impl RoomUpdateResult {
-    fn new(
+impl RoomReturn {
+    pub fn new(
         name: RoomResult,
-        public: RoomResult,
+        is_public: RoomResult,
         password: RoomResult,
         owner: RoomResult,
         max_players: RoomResult,
     ) -> Self {
-        Self { name, public, password, owner, max_players }
+        Self {
+            name,
+            is_public,
+            password,
+            owner,
+            max_players,
+        }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RoomJoin {
-    room_id: String,
+    id: String,
     password: Option<String>,
 }
 
 impl RoomJoin {
-    pub fn room_id(&self) -> String {
-        self.room_id.clone()
+    pub fn id(&self) -> String {
+        self.id.clone()
     }
 
     pub fn password(&self) -> Option<String> {
         self.password.clone()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RoomNewPlayer {
+    room_id: String,
+    player_id: Uuid,
+}
+
+impl RoomNewPlayer {
+    pub fn new(room_id: String, player_id: Uuid) -> Self {
+        Self {
+            room_id,
+            player_id,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RoomPlayerLeft {
+    room_id: String,
+    player_id: Uuid,
+}
+
+impl RoomPlayerLeft {
+    pub fn new(room_id: String, player_id: Uuid) -> Self {
+        Self {
+            room_id,
+            player_id,
+        }
     }
 }

@@ -1,19 +1,16 @@
 pub mod payloads;
 pub mod events;
 
-use futures_util::{ SinkExt, stream::FuturesUnordered };
+use futures_util::SinkExt;
 use poem::{
-    handler, http::{request, response, StatusCode}, web::{ self, websocket::{Message, WebSocket }, Data, Json, Path }, IntoResponse, Request, Response
+    handler, http::StatusCode, web::{ websocket::{Message, WebSocket }, Data }, IntoResponse
 };
-use serde::{ Serialize, Deserialize };
 use serde_json;
-use sea_orm::{prelude::Uuid, DatabaseConnection, Iden};
-use std::{collections::HashMap, hash::Hash, ops::Deref, sync::Arc, time::Duration };
-use crate::{auth, database::queries, game::room::{self, Room}};
-use tokio::{stream, sync::{ broadcast::{ self, Receiver}, RwLock }, time::sleep};
+use sea_orm::DatabaseConnection;
+use std::{collections::HashMap, sync::Arc };
+use crate::game::rooms::Room;
+use tokio::sync::{ broadcast, RwLock };
 use futures_util::StreamExt;
-use std::collections::HashSet;
-
 use payloads::*;
 
 fn unwrap_event(event: Result<Payload, Error>) -> Payload {
@@ -53,8 +50,8 @@ pub async fn gateway(
                                 match request {
                                     Payload::Identify(payload) =>
                                         events::identify(db, payload, &mut identity).await,
-                                    Payload::RoomCreate(_, payload) => events::room_create(payload, &identity, &rooms, sender.clone()).await,
-                                    Payload::RoomUpdate(room_id, payload) => events::room_update(room_id, payload, &identity, &rooms).await,
+                                    Payload::RoomCreate(payload) => events::room_create(payload, &identity, &rooms, sender.clone()).await,
+                                    Payload::RoomUpdate(payload) => events::room_update(payload, &identity, &rooms).await,
                                     Payload::RoomJoin(payload) => 
                                         events::room_join(payload, &identity, &rooms, sender.clone()).await,
                                     Payload::RoomLeave(room_id) => 
@@ -63,7 +60,7 @@ pub async fn gateway(
                                         Ok(Payload::Error( Error::Declined ))
                                     },
                                 }
-                            } else { Err(Error::BadRequest) }
+                            } else { eprintln!("{}", request.unwrap_err()); Err(Error::BadRequest) }
                         );
                         let _ = sender.send(payload.to_json_string());
                         //let _ = sink.send(Message::Text(serde_json::to_string(&payload).unwrap_or_default())).await;

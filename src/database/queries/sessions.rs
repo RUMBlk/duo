@@ -1,5 +1,5 @@
 
-use sea_orm::{prelude::{ Uuid, DateTimeWithTimeZone}, ColumnTrait, Select, Selector, SelectGetableTuple, QuerySelect, TryInsert, EntityTrait, QueryFilter, Set, SelectModel};
+use sea_orm::{prelude::Uuid, ColumnTrait, Select, Selector, SelectGetableTuple, QuerySelect, TryInsert, EntityTrait, QueryFilter, Set };
 use crate::database::entities::{ accounts, sessions, prelude::Sessions };
 
 pub fn create(id: i64, token: Uuid) -> TryInsert<sessions::ActiveModel> {

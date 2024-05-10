@@ -1,12 +1,6 @@
-use futures_util::SinkExt;
-use poem::{
-    handler, http::StatusCode, web::{ websocket::{Message, WebSocket }, Data, Json, Path }, IntoResponse, Request, Response
-};
 use serde::{ Serialize, Deserialize };
-use serde_json;
-use sea_orm::{prelude::Uuid, DatabaseConnection};
-use std::{collections::{HashMap, HashSet}, ops::Deref, sync::{ Arc, RwLock }, vec, };
-use crate::database::queries;
+use sea_orm::prelude::Uuid;
+use std::collections::HashMap;
 use tokio::sync::broadcast::{ self, Sender };
 use random_string;
 
@@ -37,25 +31,27 @@ impl Player {
 
 pub type Players = HashMap<Uuid, Player>;
 
-fn name_default() -> String { "Room".to_string() }
-fn max_players_default() -> usize { 2 }
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Room {
-    #[serde(default = "name_default")]
     name: String,
     pub is_public: bool,
     password: Option<String>,
     owner: Uuid,
-    #[serde(default = "max_players_default")]
     max_players: usize,
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     players: Players,
 }
 
 impl Room {
-    pub fn new(name: Option<String>, is_public: bool, password: Option<String>, owner: Uuid, max_players: usize) -> Self {
-        Self { name: name.unwrap_or(name_default()), is_public: is_public, password, owner, max_players, players: HashMap::new() }
+    pub fn new(name: Option<String>, is_public: Option<bool>, password: Option<String>, owner: Uuid, max_players: Option<usize>) -> Self {
+        Self { 
+            name: name.unwrap_or(String::from("Room")),
+            is_public: is_public.unwrap_or(false),
+            password,
+            owner,
+            max_players: max_players.unwrap_or(2),
+            players: HashMap::new()
+        }
     }
 
     pub fn generate_id(&self) -> String {
@@ -82,10 +78,6 @@ impl Room {
 
     pub fn max_players(&self) -> usize {
         self.max_players
-    }
-
-    pub fn players(&self) -> HashMap<Uuid, Player> {
-        self.players.clone()
     }
 
     pub fn set_name(&mut self, name: String) -> Result<ReturnCode, ReturnCode> {
@@ -127,13 +119,27 @@ impl Room {
     }
 
     pub fn leave(&mut self, player_id: Uuid) -> Result<ReturnCode, ReturnCode> {
-        let removed = self.players.remove(&player_id).ok_or(ReturnCode::PlayerNotInRoom)?;
+        self.players.remove(&player_id).ok_or(ReturnCode::PlayerNotInRoom)?;
         if self.owner == player_id { 
             let next_owner = self.players.iter().next()
                 .ok_or(ReturnCode::NoOwner)?;
             self.owner = *next_owner.0;
         }
         Ok(ReturnCode::OK)
+    }
+
+    pub fn contains_player(&self, player_id: Uuid) -> bool {
+        self.players.contains_key(&player_id)
+    }
+
+    pub fn number_of_players(&self) -> usize {
+        self.players.len()
+    }
+
+    pub fn get_partial(&self) -> Self {
+        let mut room = self.clone();
+        room.players = HashMap::new();
+        room
     }
 
 }
