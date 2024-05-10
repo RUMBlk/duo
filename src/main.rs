@@ -45,8 +45,9 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
         Ok(db) => {
             let app = Route::new()
             .at("/api/hello_world", get(hello_world))
-            .at("/api/gateway", get(gateway::gateway.data(broadcast::channel::<String>(32).0)))
-            .at("/api/auth", head(auth::exists).get(auth::login).post(auth::register))
+            .at("/api/gateway", get(gateway::gateway))
+            .at("/api/auth/register", head(auth::exists).post(auth::register))
+            .at("/api/auth/login", post(auth::login))
             .with(Cors::new())
             .with(AddData::new(Arc::new(db)))
             .with(AddData::new(Arc::new(RwLock::new(HashMap::<String, game::room::Room>::new()))));
