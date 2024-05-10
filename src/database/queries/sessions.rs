@@ -1,5 +1,5 @@
 
-use sea_orm::{prelude::Uuid, ColumnTrait, Selector, SelectGetableTuple, QuerySelect, TryInsert, EntityTrait, QueryFilter, Set};
+use sea_orm::{prelude::{ Uuid, DateTimeWithTimeZone}, ColumnTrait, Select, Selector, SelectGetableTuple, QuerySelect, TryInsert, EntityTrait, QueryFilter, Set, SelectModel};
 use crate::database::entities::{ accounts, sessions, prelude::Sessions };
 
 pub fn create(id: i64, token: Uuid) -> TryInsert<sessions::ActiveModel> {
@@ -14,10 +14,14 @@ pub fn create(id: i64, token: Uuid) -> TryInsert<sessions::ActiveModel> {
     .do_nothing()
 }
 
-pub fn get_account_uuid(token: Uuid) -> Selector<SelectGetableTuple<Uuid>> {
+fn inner_join_account(token: Uuid) -> Select<Sessions> {
     Sessions::find()
-        .filter(sessions::Column::Token.eq(token))
-        .inner_join(accounts::Entity)
+    .filter(sessions::Column::Token.eq(token))
+    .inner_join(accounts::Entity)
+}
+
+pub fn get_account_uuid(token: Uuid) -> Selector<SelectGetableTuple<Uuid>> {
+    inner_join_account(token)
         .select_only()
         .column(accounts::Column::Uuid)
         .into_tuple::<Uuid>()

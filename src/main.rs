@@ -1,14 +1,18 @@
 mod database;
-mod accounts;
+mod gateway;
+mod auth;
 mod rooms;
+mod game;
 
 use poem::{
     get, handler, head, middleware::{ AddData, Cors }, post, EndpointExt, Route
 };
 use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
-use std::sync::{ Arc, RwLock };
+use std::sync::{ Arc };
 use std::collections::HashMap;
+use tokio::sync::{ broadcast, RwLock };
+
 
 #[handler]
 fn hello_world() -> &'static str {
@@ -40,16 +44,12 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
     match db {
         Ok(db) => {
             let app = Route::new()
-            .at("/api/hello_world/", get(hello_world))
-            .at("/api/accounts/:id", head(accounts::exist_checker).post(accounts::register))
-            .at("/api/accounts/:id/sessions", post(accounts::login))
-            .at("/api/rooms/", post(rooms::create))
-            .at("/api/rooms/:id/", get(rooms::listener))
-            .at("/api/rooms/:id/join", get(rooms::join))
-            .at("/api/rooms/:id/leave", get(rooms::leave))
+            .at("/api/hello_world", get(hello_world))
+            .at("/api/gateway", get(gateway::gateway.data(broadcast::channel::<String>(32).0)))
+            .at("/api/auth", head(auth::exists).get(auth::login).post(auth::register))
             .with(Cors::new())
             .with(AddData::new(Arc::new(db)))
-            .with(AddData::new(Arc::new(RwLock::new(HashMap::<String, rooms::Room>::new()))));
+            .with(AddData::new(Arc::new(RwLock::new(HashMap::<String, game::room::Room>::new()))));
             Ok(app.into())
         }
         Err(e) => {
