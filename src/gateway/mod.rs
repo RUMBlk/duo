@@ -60,7 +60,7 @@ pub async fn gateway(
                                     Payload::RoomLeave(room_id) => 
                                         events::room_leave(room_id, &identity, &rooms).await,
                                     _ => {         
-                                        Ok(Payload::Hello( Hello::new(60) ))
+                                        Ok(Payload::Error( Error::Declined ))
                                     },
                                 }
                             } else { Err(Error::BadRequest) }

@@ -44,6 +44,7 @@ impl Payload {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Error {
         BadRequest,
+        Declined,
         BadToken,
         InvalidToken,
         InternalServerError,
@@ -100,39 +101,20 @@ impl From<entities::accounts::Model> for Identity {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RoomUpdate {
     name: Option<String>,
-    public: Option<bool>,
+    is_public: Option<bool>,
     password: Option<String>,
     owner: Option<Uuid>,
     max_players: Option<usize>,
 }
 
 impl RoomUpdate {
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
-    }
-
-    pub fn public(&self) -> Option<bool> {
-        self.public
-    }
-
-    pub fn password(&self) -> Option<String> {
-        self.password.clone()
-    }
-
-    pub fn owner(&self) -> Option<Uuid> {
-        self.owner
-    }
-
-    pub fn max_players(&self) -> Option<usize> {
-        self.max_players
-    }
-
-    pub fn apply(&self, room: &mut Room) -> RoomUpdateResult {
+    pub fn apply(&mut self, room: &mut Room) -> RoomUpdateResult {
         let name = self.name.as_ref().and_then(|name| {
             Some(room.set_name(name.clone()))
         });
-        let public = self.public.and_then(|public| {
-            room.public = public;
+        if let Some(Err(_)) = name { self.name = None };
+        let is_public = self.is_public.and_then(|is_public| {
+            room.is_public = is_public;
             Some(Ok(room::ReturnCode::OK))
         });
         let password = self.password.as_ref().and_then(|password| {
@@ -141,13 +123,16 @@ impl RoomUpdate {
             } else { Some(password) };
             Some(room.set_password(password.cloned()))
         });
+        if let Some(Err(_)) = password { self.password = None };
         let owner = self.owner.and_then(|player_id| {
             Some(room.set_owner(player_id))
         });
+        if let Some(Err(_)) = owner { self.owner = None };
         let max_players = self.max_players.and_then(|max_players| {
             Some(room.set_max_players(max_players))
         });
-        RoomUpdateResult::new(name, public, password, owner, max_players)
+        if let Some(Err(_)) = max_players { self.max_players = None };
+        RoomUpdateResult::new(name, is_public, password, owner, max_players)
     }
 }
 

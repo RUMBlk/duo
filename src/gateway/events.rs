@@ -38,11 +38,13 @@ pub async fn room_create(mut payload: Room, identity: &Option<Identity>, rooms: 
     Ok(Payload::RoomCreate(room_id, payload))
 }
 
-pub async fn room_update(room_id: String, payload: RoomUpdate, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>) -> Result<Payload, Error> {
-    let identity = identity.clone().ok_or(Error::Forbidden)?;
+pub async fn room_update(room_id: String, mut payload: RoomUpdate, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>) -> Result<Payload, Error> {
+    identity.clone().ok_or(Error::Forbidden)?;
     let mut rooms = rooms.write().await;
     let room = rooms.get_mut(&room_id).ok_or(Error::NotFound)?;
-    Ok(Payload::RoomUpdateResult(payload.apply(room)))
+    let result = payload.apply(room);
+    room.announce(Payload::RoomUpdate(room_id, payload).to_json_string());
+    Ok(Payload::RoomUpdateResult(result))
 }
 
 pub async fn room_join(payload: RoomJoin, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>,  sender: Sender<String>) -> Result<Payload, Error> {

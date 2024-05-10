@@ -44,7 +44,7 @@ fn max_players_default() -> usize { 2 }
 pub struct Room {
     #[serde(default = "name_default")]
     name: String,
-    pub public: bool,
+    pub is_public: bool,
     password: Option<String>,
     owner: Uuid,
     #[serde(default = "max_players_default")]
@@ -54,8 +54,8 @@ pub struct Room {
 }
 
 impl Room {
-    pub fn new(name: Option<String>, public: bool, password: Option<String>, owner: Uuid, max_players: usize) -> Self {
-        Self { name: name.unwrap_or(name_default()), public: public, password, owner, max_players, players: HashMap::new() }
+    pub fn new(name: Option<String>, is_public: bool, password: Option<String>, owner: Uuid, max_players: usize) -> Self {
+        Self { name: name.unwrap_or(name_default()), is_public: is_public, password, owner, max_players, players: HashMap::new() }
     }
 
     pub fn generate_id(&self) -> String {
