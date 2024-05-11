@@ -7,49 +7,65 @@ use random_string;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ReturnCode {
     OK,
-    BadRequest,
     PlayerAlreadyInRoom,
     PlayerNotInRoom,
     InvalidName,
     InvalidPassword,
     NoOwner,
     Full,
+    MaxPlayersNotSet,
+    MaxPlayersCantBeLowerThan(usize),
 }
 
 #[derive(Debug, Serialize, Clone)]
 pub struct Player {
     #[serde(skip_serializing)]
     sender: broadcast::Sender<String>,
+    is_ready: bool,
     points: u64,
 }
 
 impl Player {
     pub fn new(sender: Sender<String>) -> Self {
-        Self { sender, points: 0 }
+        Self { sender, is_ready: false, points: 0 }
     }
 }
 
+pub type Table = HashMap::<String, Room>;
 pub type Players = HashMap<Uuid, Player>;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Room {
-    name: String,
-    pub is_public: bool,
+    name: Option<String>,
+    pub is_public: Option<bool>,
     password: Option<String>,
-    owner: Uuid,
-    max_players: usize,
+    owner: Option<Uuid>,
+    max_players: Option<usize>,
     #[serde(skip_deserializing)]
     players: Players,
 }
 
+impl Default for Room {
+    fn default() -> Self {
+        Self {
+            name: Some(String::from("Room")),
+            is_public: Some(false),
+            password: None,
+            owner: None,
+            max_players: Some(2),
+            players: HashMap::new(),
+        }
+    }
+}
+
 impl Room {
-    pub fn new(name: Option<String>, is_public: Option<bool>, password: Option<String>, owner: Uuid, max_players: Option<usize>) -> Self {
+    pub fn new(name: Option<String>, is_public: Option<bool>, password: Option<String>, owner: Option<Uuid>, max_players: Option<usize>) -> Self {
         Self { 
-            name: name.unwrap_or(String::from("Room")),
-            is_public: is_public.unwrap_or(false),
+            name,
+            is_public,
             password,
             owner,
-            max_players: max_players.unwrap_or(2),
+            max_players,
             players: HashMap::new()
         }
     }
@@ -64,44 +80,63 @@ impl Room {
         }
     }
 
-    pub fn name(&self) -> String {
-        self.name.clone()
+    pub fn announce_self(&self) {
+        self.announce(serde_json::to_string(self).expect("Failed to serialize Room"))
     }
 
-    pub fn password(&self) -> Option<String> {
-        self.password.clone()
+    pub fn name(&self) -> &Option<String> {
+        &self.name
     }
 
-    pub fn owner(&self) -> Uuid {
-        self.owner
+    pub fn password(&self) -> &Option<String> {
+        &self.password
     }
 
-    pub fn max_players(&self) -> usize {
-        self.max_players
+    pub fn owner(&self) -> &Option<Uuid> {
+        &self.owner
+    }
+
+    pub fn max_players(&self) -> &Option<usize> {
+        &self.max_players
     }
 
     pub fn set_name(&mut self, name: String) -> Result<ReturnCode, ReturnCode> {
-        if !name.is_empty() { self.name = name; Ok(ReturnCode::OK) }
-        else { Err(ReturnCode::InvalidName) }
+        if !name.is_empty() { self.name = Some(name); }
+        else { return Err(ReturnCode::InvalidName) }
+        Ok(ReturnCode::OK)
     }
 
     pub fn set_password(&mut self, password: Option<String>) -> Result<ReturnCode, ReturnCode> {
         if let Some(ref pass) = password {
-            if pass.len() < 32 { self.password = password; }
+            if pass.len() < 32 { 
+                self.password = if pass.is_empty() { None } else { password }
+            }
             else { return Err(ReturnCode::InvalidPassword) }
-        } 
+        }
         Ok(ReturnCode::OK)
     }
 
     pub fn set_owner(&mut self, player_id: Uuid) -> Result<ReturnCode, ReturnCode> {
-        if self.players.contains_key(&player_id) { self.owner = player_id; Ok(ReturnCode::OK) }
-        else { Err(ReturnCode::PlayerNotInRoom) }
+        if self.players.contains_key(&player_id) { self.owner = Some(player_id); }
+        else { return Err(ReturnCode::PlayerNotInRoom) };
+        Ok(ReturnCode::OK)
     }
 
     pub fn set_max_players(&mut self, max_players: usize) -> Result<ReturnCode, ReturnCode> {
-        if max_players < 2 { return Err( ReturnCode::BadRequest ) }
-        else { self.max_players = max_players }
+        if max_players < 2 { return Err( ReturnCode::MaxPlayersCantBeLowerThan(Self::default().max_players.unwrap()) ) }
+        else { self.max_players = Some(max_players) }
         Ok(ReturnCode::OK)
+    }
+
+    pub fn batch_update(&mut self, from: &Self) -> Vec<Result<ReturnCode, ReturnCode>> {
+        let mut errors = Vec::new();
+        if let Some(value) = &from.name { errors.push( self.set_name(value.to_owned())) };
+        if let Some(value) = from.is_public { self.is_public = Some(value); };
+        errors.push( self.set_password(from.password.clone()));
+        if let Some(value) = from.owner { errors.push( self.set_owner(value)) };
+        if let Some(value) = from.max_players { errors.push( self.set_max_players(value)) };
+        self.announce_self();
+        errors
     }
 
     pub fn join(&mut self, password: Option<String>, player_id: Uuid, sender: Sender<String>) -> Result<ReturnCode, ReturnCode> {
@@ -110,7 +145,8 @@ impl Room {
                 return Err(ReturnCode::InvalidPassword);
             }
         }
-        if self.players.len() >= self.max_players {
+        let max_players = self.max_players.ok_or(ReturnCode::MaxPlayersNotSet)?;
+        if self.players.len() >= max_players {
             return Err(ReturnCode::Full)
         }
 
@@ -120,10 +156,10 @@ impl Room {
 
     pub fn leave(&mut self, player_id: Uuid) -> Result<ReturnCode, ReturnCode> {
         self.players.remove(&player_id).ok_or(ReturnCode::PlayerNotInRoom)?;
-        if self.owner == player_id { 
+        if self.owner == Some(player_id) { 
             let next_owner = self.players.iter().next()
                 .ok_or(ReturnCode::NoOwner)?;
-            self.owner = *next_owner.0;
+            self.owner = Some(*next_owner.0);
         }
         Ok(ReturnCode::OK)
     }

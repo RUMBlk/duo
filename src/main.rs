@@ -9,12 +9,9 @@ use poem::{
 use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
 use std::sync::Arc;
-use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 use http::*;
-
-type RoomsTable = HashMap::<String, game::rooms::Room>;
 
 #[handler]
 fn hello_world() -> &'static str {
@@ -53,7 +50,7 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/rooms", get(http::rooms::get_rooms_list))
             .with(Cors::new())
             .with(AddData::new(Arc::new(db)))
-            .with(AddData::new(Arc::new(RwLock::new(RoomsTable::new()))));
+            .with(AddData::new(Arc::new(RwLock::new(game::rooms::Table::new()))));
             Ok(app.into())
         }
         Err(e) => {

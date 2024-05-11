@@ -60,7 +60,7 @@ pub async fn gateway(
                                         Ok(Payload::Error( Error::Declined ))
                                     },
                                 }
-                            } else { eprintln!("{}", request.unwrap_err()); Err(Error::BadRequest) }
+                            } else { Err(Error::BadRequest(request.unwrap_err().to_string())) }
                         );
                         let _ = sender.send(payload.to_json_string());
                         //let _ = sink.send(Message::Text(serde_json::to_string(&payload).unwrap_or_default())).await;

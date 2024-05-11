@@ -21,7 +21,7 @@ pub async fn identify(db: &DatabaseConnection, payload: Identify, store_in: &mut
 pub async fn room_create(room: RoomCreate, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>, sender: Sender<String>) -> Result<Payload, Error> {
     let identity = identity.clone().ok_or(Error::Forbidden)?;
     let mut rooms = rooms.write().await;
-    let mut room = room.create_room(identity.uuid());
+    let mut room = room.create_room(identity.uuid())?;
     let _ = room.join(room.password().clone(), identity.uuid(), sender);
     let id = room.generate_id().clone();
     rooms.insert(id.clone(), room.clone());
@@ -29,25 +29,25 @@ pub async fn room_create(room: RoomCreate, identity: &Option<Identity>, rooms: &
     Ok(Payload::RoomCreate(payload))
 }
 
-pub async fn room_update(mut payload: RoomUpdate, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>) -> Result<Payload, Error> {
+pub async fn room_update(payload: RoomUpdate, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>) -> Result<Payload, Error> {
     let identity = identity.clone().ok_or(Error::Forbidden)?;
     let mut rooms = rooms.write().await;
-    let room = rooms.get_mut(&payload.id()).ok_or(Error::NotFound)?;
+    let room = rooms.get_mut(payload.id()).ok_or(Error::NotFound)?;
     if room.contains_player(identity.uuid()) == false {
         return Err(Error::Forbidden)
     }
-    let result = payload.apply_update(room);
-    Ok(Payload::RoomReturn(result))
+    let result = room.batch_update(payload.room());
+    if result.is_empty() { Ok(Payload::OK) } else { Err(Error::Room(result)) }
 }
 
 pub async fn room_join(payload: RoomJoin, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>,  sender: Sender<String>) -> Result<Payload, Error> {
     let identity = identity.clone().ok_or(Error::Forbidden)?;
     let mut rooms = rooms.write().await;
-    let room = rooms.get_mut(&payload.id()).ok_or(Error::NotFound)?;
-    room.join( payload.password(), identity.uuid(), sender)
+    let room = rooms.get_mut(payload.id()).ok_or(Error::NotFound)?;
+    room.join( payload.password().clone(), identity.uuid(), sender)
         .map_err(|_| Error::Forbidden)?;
     let new_player = RoomNewPlayer::new(payload.id().clone(), identity.uuid());
-    let payload = RoomCreate::from_room(payload.id(), room.clone());
+    let payload = RoomCreate::from_room(payload.id().clone(), room.clone());
     room.announce(Payload::RoomNewPlayer(new_player).to_json_string());
     Ok(Payload::RoomCreate(payload))
 }
