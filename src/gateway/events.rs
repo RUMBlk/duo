@@ -1,23 +1,78 @@
 
 use sea_orm::{prelude::Uuid, DatabaseConnection };
-use std::{collections::HashMap, sync::Arc, };
-use crate::{database::queries, game::rooms::Room};
-use tokio::sync::{ broadcast::Sender, RwLock };
+use std::sync::Arc;
+use crate::{ database::queries, game::{self, rooms} };
+use tokio::sync::{ broadcast::Sender, RwLock, RwLockWriteGuard };
 use super::payloads::*;
 
-pub async fn identify(db: &DatabaseConnection, payload: Identify, store_in: &mut Option<Identity>) -> Result<Payload, Error> {
+//Receive
+
+pub async fn identify(
+    db: &DatabaseConnection,
+    payload: Identify,
+    players: &Arc<RwLock<super::sessions::Table>>,
+    rooms: &Arc<RwLock<game::rooms::Table>>,
+    sender: Sender<String>,
+) -> Result<Payload, Error> {
     let token = Uuid::parse_str(payload.token().as_str()).map_err(|_| Error::BadToken)?;
     let uuid = queries::sessions::get_account_uuid(token).one(db).await
         .map_err(|_| Error::InternalServerError)?
         .ok_or(Error::InvalidToken)?;
-    let account = queries::accounts::by_uuid(uuid).one(db).await
-        .map_err(|_| Error::InternalServerError)?
-        .ok_or(Error::InvalidToken)?;
-    let identity = Identity::from(account);
-    *store_in = Some(identity.clone());
-    Ok(Payload::Identity(identity))
+
+    let mut players = players.write().await;
+    let mut rooms = rooms.write().await;
+    let player = if let Some(player) = players.get_mut(&uuid) {
+        player.set_sender(sender);
+        if let Some(room_id) = &player.room {
+            if let None = rooms.get_mut(room_id) {
+                player.room = None
+            } 
+        }
+        player.clone()
+    } else {
+        let account = queries::accounts::by_uuid(uuid).one(db).await
+            .map_err(|_| Error::InternalServerError)?
+            .ok_or(Error::InvalidToken)?;
+        let mut player = super::sessions::User::from(account);
+        player.set_sender(sender);
+        players.insert(uuid, player.clone());
+        player
+
+    };
+    Ok(Payload::Ready(player))
 }
 
+pub async fn send_to_room_players(
+    mut players: RwLockWriteGuard<'_, super::sessions::Table>,
+    room: &rooms::Room,
+    payload: Payload,
+) {
+    for player_id in room.players_id() {
+        if let Some(player) = players.get_mut(player_id) {
+            if let Some(sender) = &player.sender {
+                if let Err(_) = sender.send(payload.to_json_string()) {
+                    player.sender = None;
+                }
+            }
+        }
+    }
+}
+
+pub async fn room_update(
+    players: RwLockWriteGuard<'_, super::sessions::Table>,
+    room: &rooms::Room
+) {
+    send_to_room_players(players, room, Payload::RoomUpdate(room.clone())).await;
+}
+
+pub async fn room_players_update(
+    players: RwLockWriteGuard<'_, super::sessions::Table>,
+    room: &rooms::Room
+) {
+    send_to_room_players(players, room, Payload::RoomPlayersUpdate(room.players().clone())).await;
+}
+
+/*
 pub async fn room_create(room: RoomCreate, identity: &Option<Identity>, rooms: &Arc<RwLock<HashMap<String, Room>>>, sender: Sender<String>) -> Result<Payload, Error> {
     let identity = identity.clone().ok_or(Error::Forbidden)?;
     let mut rooms = rooms.write().await;
@@ -61,4 +116,4 @@ pub async fn room_leave(room_id: String, identity: &Option<Identity>, rooms: &Ar
     let payload = RoomPlayerLeft::new(room_id, identity.uuid());
     let _ = room.announce(Payload::RoomPlayerLeft(payload).to_json_string());
     Ok(Payload::OK)
-}
+}*/

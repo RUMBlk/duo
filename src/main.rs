@@ -4,7 +4,7 @@ mod http;
 mod game;
 
 use poem::{
-    get, handler, head, middleware::{ AddData, Cors }, post, EndpointExt, Route
+    get, handler, head, middleware::{ AddData, Cors }, patch, post, EndpointExt, Route
 };
 use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
@@ -47,9 +47,13 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/gateway", get(gateway::gateway))
             .at("/api/auth/register", head(auth::exists).post(auth::register))
             .at("/api/auth/login", post(auth::login))
-            .at("/api/rooms", get(http::rooms::get_rooms_list))
+            .at("/api/rooms", get(http::rooms::get_rooms_list).post(http::rooms::create))
+            .at("/api/rooms/:id", patch(http::rooms::update))
+            .at("/api/rooms/:id/join", post(http::rooms::join))
+            .at("/api/rooms/:id/leave", post(http::rooms::leave))
             .with(Cors::new())
             .with(AddData::new(Arc::new(db)))
+            .with(AddData::new(Arc::new(RwLock::new(gateway::sessions::Table::new()))))
             .with(AddData::new(Arc::new(RwLock::new(game::rooms::Table::new()))));
             Ok(app.into())
         }

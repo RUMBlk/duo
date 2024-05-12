@@ -1,5 +1,6 @@
 pub mod payloads;
 pub mod events;
+pub mod sessions;
 
 use futures_util::SinkExt;
 use poem::{
@@ -7,8 +8,8 @@ use poem::{
 };
 use serde_json;
 use sea_orm::DatabaseConnection;
-use std::{collections::HashMap, sync::Arc };
-use crate::game::rooms::Room;
+use std::sync::Arc;
+use crate::game;
 use tokio::sync::{ broadcast, RwLock };
 use futures_util::StreamExt;
 use payloads::*;
@@ -24,13 +25,14 @@ fn unwrap_event(event: Result<Payload, Error>) -> Payload {
 pub async fn gateway(
     ws: WebSocket,
     db: Data<&Arc<DatabaseConnection>>,
-    rooms: Data<&Arc<RwLock<HashMap<String, Room>>>>,
+    players: Data<&Arc<RwLock<sessions::Table>>>,
+    rooms: Data<&Arc<RwLock<game::rooms::Table>>>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let db = db.to_owned(); 
+    let players = players.to_owned();
     let rooms = rooms.to_owned();
     let (sender, mut receiver) = broadcast::channel::<String>(12);
     //let mut receivers = sender.subscribe();
-    let mut identity = None;
 
     Ok(
         ws.on_upgrade(move |mut socket| async move {
@@ -49,13 +51,13 @@ pub async fn gateway(
                             if let Ok(request) = request {
                                 match request {
                                     Payload::Identify(payload) =>
-                                        events::identify(db, payload, &mut identity).await,
-                                    Payload::RoomCreate(payload) => events::room_create(payload, &identity, &rooms, sender.clone()).await,
+                                        events::identify(db, payload, &players, &rooms, sender.clone()).await,
+                                    /*Payload::RoomCreate(payload) => events::room_create(payload, &identity, &rooms, sender.clone()).await,
                                     Payload::RoomUpdate(payload) => events::room_update(payload, &identity, &rooms).await,
                                     Payload::RoomJoin(payload) => 
                                         events::room_join(payload, &identity, &rooms, sender.clone()).await,
                                     Payload::RoomLeave(room_id) => 
-                                        events::room_leave(room_id, &identity, &rooms).await,
+                                        events::room_leave(room_id, &identity, &rooms).await,*/
                                     _ => {         
                                         Ok(Payload::Error( Error::Declined ))
                                     },
@@ -71,7 +73,9 @@ pub async fn gateway(
             tokio::spawn(async move {
                 while let Ok(text) = receiver.recv().await {
                     let msg = Message::text(text);
-                    let _ = sink.send(msg).await;
+                    if let Err(_) = sink.send(msg).await {
+                        break;
+                    }
                 }
             });
 

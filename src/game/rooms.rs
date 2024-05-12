@@ -1,7 +1,7 @@
+use poem::http::StatusCode;
 use serde::{ Serialize, Deserialize };
 use sea_orm::prelude::Uuid;
-use std::collections::HashMap;
-use tokio::sync::broadcast::{ self, Sender };
+use std::collections::{ HashMap, hash_map::Keys };
 use random_string;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,15 +19,13 @@ pub enum ReturnCode {
 
 #[derive(Debug, Serialize, Clone)]
 pub struct Player {
-    #[serde(skip_serializing)]
-    sender: broadcast::Sender<String>,
     is_ready: bool,
     points: u64,
 }
 
 impl Player {
-    pub fn new(sender: Sender<String>) -> Self {
-        Self { sender, is_ready: false, points: 0 }
+    pub fn new() -> Self {
+        Self { is_ready: false, points: 0 }
     }
 }
 
@@ -36,6 +34,7 @@ pub type Players = HashMap<Uuid, Player>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Room {
+    id: Option<String>,
     name: Option<String>,
     pub is_public: Option<bool>,
     password: Option<String>,
@@ -48,6 +47,7 @@ pub struct Room {
 impl Default for Room {
     fn default() -> Self {
         Self {
+            id: Some(Self::generate_id()),
             name: Some(String::from("Room")),
             is_public: Some(false),
             password: None,
@@ -61,6 +61,7 @@ impl Default for Room {
 impl Room {
     pub fn new(name: Option<String>, is_public: Option<bool>, password: Option<String>, owner: Option<Uuid>, max_players: Option<usize>) -> Self {
         Self { 
+            id: Some(Self::generate_id()),
             name,
             is_public,
             password,
@@ -70,18 +71,16 @@ impl Room {
         }
     }
 
-    pub fn generate_id(&self) -> String {
+    pub fn generate_id() -> String {
         random_string::generate(6, "0123456789")
     }
 
-    pub fn announce(&self, text: String) {
-        for player in self.players.iter() {
-            let _ = player.1.sender.send(text.clone());
-        }
+    pub fn regenerate_id(&mut self) {
+        self.id = Some(Self::generate_id())
     }
 
-    pub fn announce_self(&self) {
-        self.announce(serde_json::to_string(self).expect("Failed to serialize Room"))
+    pub fn id(&self) -> &Option<String> {
+        &self.id
     }
 
     pub fn name(&self) -> &Option<String> {
@@ -98,6 +97,18 @@ impl Room {
 
     pub fn max_players(&self) -> &Option<usize> {
         &self.max_players
+    }
+
+    pub fn players_id(&self) -> Keys<'_, Uuid, Player>{ 
+        self.players.keys()
+    }
+
+    pub fn players(&self) -> &Players {
+        &self.players
+    }
+
+    pub fn player(&mut self, player_id: Uuid) -> Option<&mut Player> {
+        self.players.get_mut(&player_id)
     }
 
     pub fn set_name(&mut self, name: String) -> Result<ReturnCode, ReturnCode> {
@@ -135,11 +146,10 @@ impl Room {
         errors.push( self.set_password(from.password.clone()));
         if let Some(value) = from.owner { errors.push( self.set_owner(value)) };
         if let Some(value) = from.max_players { errors.push( self.set_max_players(value)) };
-        self.announce_self();
         errors
     }
 
-    pub fn join(&mut self, password: Option<String>, player_id: Uuid, sender: Sender<String>) -> Result<ReturnCode, ReturnCode> {
+    pub fn join(&mut self, password: Option<String>, player_id: Uuid) -> Result<ReturnCode, ReturnCode> {
         if let Some(pass) = &self.password {
             if Some(pass) != password.as_ref() {
                 return Err(ReturnCode::InvalidPassword);
@@ -150,7 +160,8 @@ impl Room {
             return Err(ReturnCode::Full)
         }
 
-        self.players.insert(player_id, Player::new(sender)).ok_or(ReturnCode::PlayerAlreadyInRoom)?;
+        if self.players.contains_key(&player_id) { return Err(ReturnCode::PlayerAlreadyInRoom) }
+        self.players.insert(player_id, Player::new());
         Ok(ReturnCode::OK)
     }
 
