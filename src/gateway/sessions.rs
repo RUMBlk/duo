@@ -1,7 +1,7 @@
 use serde::{ Serialize, Deserialize };
 use sea_orm::prelude::Uuid;
-use std::collections::HashMap;
-use tokio::sync::broadcast::Sender;
+use std::{ sync::Arc, collections::HashMap };
+use tokio::sync::{ RwLock, broadcast::Sender };
 
 use crate::database::entities;
 
@@ -18,7 +18,7 @@ pub enum ReturnCode {
     MaxPlayersCantBeLowerThan(usize),
 }
 
-pub type Table = HashMap<Uuid, User>;
+pub type Table = HashMap<Uuid, Arc<RwLock<User>>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {

@@ -1,4 +1,3 @@
-use poem::http::StatusCode;
 use serde::{ Serialize, Deserialize };
 use sea_orm::prelude::Uuid;
 use std::collections::{ HashMap, hash_map::Keys };
@@ -12,6 +11,7 @@ pub enum ReturnCode {
     InvalidName,
     InvalidPassword,
     NoOwner,
+    OwnerChanged,
     Full,
     MaxPlayersNotSet,
     MaxPlayersCantBeLowerThan(usize),
@@ -99,7 +99,7 @@ impl Room {
         &self.max_players
     }
 
-    pub fn players_id(&self) -> Keys<'_, Uuid, Player>{ 
+    pub fn player_ids(&self) -> Keys<'_, Uuid, Player>{ 
         self.players.keys()
     }
 
@@ -171,8 +171,8 @@ impl Room {
             let next_owner = self.players.iter().next()
                 .ok_or(ReturnCode::NoOwner)?;
             self.owner = Some(*next_owner.0);
-        }
-        Ok(ReturnCode::OK)
+            Ok(ReturnCode::OwnerChanged)
+        } else { Ok(ReturnCode::OK) }
     }
 
     pub fn contains_player(&self, player_id: Uuid) -> bool {

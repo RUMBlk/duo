@@ -1,6 +1,6 @@
 use serde::{ Serialize, Deserialize };
 use serde_json;
-use crate::game;
+use crate::game::{self, rooms};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Payload {
@@ -10,12 +10,12 @@ pub enum Payload {
     #[serde(skip_deserializing)]
     Hello(Hello),
     #[serde(skip_deserializing)]
-    RoomPlayersUpdate(game::rooms::Players),
+    RoomPlayersUpdate(RoomPlayersUpdate),
+    RoomCreate(game::rooms::Room),
+    RoomUpdate(game::rooms::Room),
     //From Server/Client
     Identify(Identify),
     Ready(super::sessions::User),
-    RoomCreate(game::rooms::Room),
-    RoomUpdate(game::rooms::Room),
     /*//From Client
     RoomJoin(RoomJoin),
     RoomLeave(String),*/
@@ -59,3 +59,20 @@ impl Identify {
         self.token.clone()
     }
 }
+
+#[derive(Debug, Serialize)]
+pub struct RoomPlayersUpdate {
+    id: Option<String>,
+    players: rooms::Players,
+}
+
+impl From<rooms::Room> for RoomPlayersUpdate {
+    fn from(value: rooms::Room) -> Self {
+        Self {
+            id: value.id().clone(),
+            players: value.players().clone(),
+        }
+    }
+}
+
+

@@ -1,8 +1,8 @@
 
 use sea_orm::{prelude::Uuid, DatabaseConnection };
-use std::sync::Arc;
+use std::{ sync::Arc, collections::hash_map::Keys };
 use crate::{ database::queries, game::{self, rooms} };
-use tokio::sync::{ broadcast::Sender, RwLock, RwLockWriteGuard };
+use tokio::sync::{ broadcast::Sender, RwLock };
 use super::payloads::*;
 
 //Receive
@@ -21,7 +21,8 @@ pub async fn identify(
 
     let mut players = players.write().await;
     let mut rooms = rooms.write().await;
-    let player = if let Some(player) = players.get_mut(&uuid) {
+    let player = if let Some(player) = players.get(&uuid) {
+        let mut player = player.write().await;
         player.set_sender(sender);
         if let Some(room_id) = &player.room {
             if let None = rooms.get_mut(room_id) {
@@ -35,20 +36,21 @@ pub async fn identify(
             .ok_or(Error::InvalidToken)?;
         let mut player = super::sessions::User::from(account);
         player.set_sender(sender);
-        players.insert(uuid, player.clone());
+        players.insert(uuid, Arc::new(RwLock::new(player.clone())));
         player
 
     };
     Ok(Payload::Ready(player))
 }
 
-pub async fn send_to_room_players(
-    mut players: RwLockWriteGuard<'_, super::sessions::Table>,
-    room: &rooms::Room,
+pub async fn send_to_room_players<'a>(
+    players_ptr: Arc<RwLock<super::sessions::Table>>,
+    room_player_ids: Keys<'a, Uuid, rooms::Player>,
     payload: Payload,
 ) {
-    for player_id in room.players_id() {
-        if let Some(player) = players.get_mut(player_id) {
+    for player_id in room_player_ids {
+        if let Some(player) = players_ptr.read().await.get(player_id) {
+            let mut player = player.write().await;
             if let Some(sender) = &player.sender {
                 if let Err(_) = sender.send(payload.to_json_string()) {
                     player.sender = None;
@@ -58,18 +60,25 @@ pub async fn send_to_room_players(
     }
 }
 
-pub async fn room_update(
-    players: RwLockWriteGuard<'_, super::sessions::Table>,
-    room: &rooms::Room
+pub async fn room_create(
+    players: Arc<RwLock<super::sessions::Table>>,
+    room: rooms::Room
 ) {
-    send_to_room_players(players, room, Payload::RoomUpdate(room.clone())).await;
+    send_to_room_players(players, room.clone().player_ids(), Payload::RoomCreate(room)).await;
+}
+
+pub async fn room_update(
+    players: Arc<RwLock<super::sessions::Table>>,
+    room: rooms::Room
+) {
+    send_to_room_players(players, room.clone().player_ids(), Payload::RoomUpdate(room)).await;
 }
 
 pub async fn room_players_update(
-    players: RwLockWriteGuard<'_, super::sessions::Table>,
-    room: &rooms::Room
+    players: Arc<RwLock<super::sessions::Table>>,
+    room: rooms::Room
 ) {
-    send_to_room_players(players, room, Payload::RoomPlayersUpdate(room.players().clone())).await;
+    send_to_room_players(players, room.clone().player_ids(), Payload::RoomPlayersUpdate(RoomPlayersUpdate::from(room))).await;
 }
 
 /*

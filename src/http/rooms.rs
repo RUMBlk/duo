@@ -66,8 +66,8 @@ pub async fn create(
     req: &Request,
     body: Json<Room>,
     db: Data<&Arc<DatabaseConnection>>,
-    players: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms: Data<&Arc<RwLock<rooms::Table>>>,
+    players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
 ) -> Result<Response, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
@@ -79,10 +79,11 @@ pub async fn create(
         .map_err(|_| StatusCode::BAD_GATEWAY)?
         .ok_or(StatusCode::FORBIDDEN)?;
 
-    let mut players = players.write().await;
-    let player = players.get_mut(&player_id).ok_or(StatusCode::FORBIDDEN)?;
+    let mut players = players_ptr.read().await;
+    let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
+    if let Some(_) = player.room { return Err(StatusCode::FORBIDDEN) };
 
-    let mut rooms = rooms.write().await;
+    let mut rooms = rooms_ptr.write().await;
     let mut room = Room::default();
     let errors: Vec<ReturnCode> = room.batch_update(&body).into_iter().filter_map(|value| {
         match value {
@@ -91,19 +92,17 @@ pub async fn create(
         }
     }).collect();
     let room = if errors.len() == 0 {
-        let _ = room.join(room.password().clone(), auth);
+        let _ = room.join(room.password().clone(), player_id);
         player.room = room.id().clone();
-        drop(players);
-        let _ = room.set_owner(auth);
+        let _ = room.set_owner(player_id);
 
-        loop {
+        let id = loop {
             let id = room.id().clone().unwrap();
             if rooms.contains_key(&id) { room.regenerate_id(); } 
-            else { 
-                rooms.insert(room.id().clone().unwrap(), room.clone());
-                break;
-            }
-        }
+            else { break id; }
+        };
+        rooms.insert(id, room.clone());
+        tokio::spawn(gateway::events::room_create(players_ptr.to_owned(), room.clone()));
         Some(room)
     } else { None };
     Ok(Response::builder()
@@ -117,8 +116,8 @@ pub async fn update(
     req: &Request,
     body: Json<Room>,
     db: Data<&Arc<DatabaseConnection>>,
-    players: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms: Data<&Arc<RwLock<rooms::Table>>>,
+    players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
 ) -> Result<Response, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
@@ -130,10 +129,10 @@ pub async fn update(
         .map_err(|_| StatusCode::BAD_GATEWAY)?
         .ok_or(StatusCode::FORBIDDEN)?;
 
-    let mut players = players.write().await;
+    let mut players = players_ptr.write().await;
     players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?;
 
-    let mut rooms = rooms.write().await;
+    let mut rooms = rooms_ptr.write().await;
     let mut room = rooms.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
     let errors: Vec<ReturnCode> = room.batch_update(&body).into_iter().filter_map(|value| {
         match value {
@@ -143,7 +142,7 @@ pub async fn update(
     }).collect();
 
     let room = room.clone();
-    gateway::events::room_update(players, &room).await;
+    tokio::spawn(gateway::events::room_update(players_ptr.to_owned(), room.clone()));
     Ok(Response::builder()
         .body(serde_json::to_string(&RoomResult::new(Some(room), errors)).expect("Failed to serialize RoomResult")))
 
@@ -160,8 +159,8 @@ pub async fn join(
     req: &Request,
     body: Json<RoomJoin>,
     db: Data<&Arc<DatabaseConnection>>,
-    players: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms: Data<&Arc<RwLock<rooms::Table>>>,
+    players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
 ) -> Result<Json<Room>, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
@@ -173,14 +172,14 @@ pub async fn join(
         .map_err(|_| StatusCode::BAD_GATEWAY)?
         .ok_or(StatusCode::FORBIDDEN)?;
 
-    let mut players = players.write().await;
-    let mut player = players.get_mut(&player_id).ok_or(StatusCode::FORBIDDEN)?;
+    let mut players = players_ptr.write().await;
+    let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
 
-    let mut rooms = rooms.write().await;
+    let mut rooms = rooms_ptr.write().await;
     let mut room = rooms.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
     room.join(body.password.clone(), player_id).map_err(|_| StatusCode::FORBIDDEN)?;
     player.room = Some(id);
-    gateway::events::room_players_update(players, &room).await;
+    tokio::spawn(gateway::events::room_players_update(players_ptr.to_owned(), room.clone()));
     Ok(Json(room.clone()))
 
 }
@@ -190,8 +189,8 @@ pub async fn leave(
     Path(id): Path<String>,
     req: &Request,
     db: Data<&Arc<DatabaseConnection>>,
-    players: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms: Data<&Arc<RwLock<rooms::Table>>>,
+    players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
 ) -> Result<StatusCode, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
@@ -203,14 +202,17 @@ pub async fn leave(
         .map_err(|_| StatusCode::BAD_GATEWAY)?
         .ok_or(StatusCode::FORBIDDEN)?;
 
-    let mut players = players.write().await;
-    let mut player = players.get_mut(&player_id).ok_or(StatusCode::FORBIDDEN)?;
+    let mut players = players_ptr.write().await;
+    let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
 
-    let mut rooms = rooms.write().await;
+    let mut rooms = rooms_ptr.write().await;
     let mut room = rooms.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
-    room.leave(player_id).map_err(|_| StatusCode::PRECONDITION_FAILED)?;
+    match room.leave(player_id).map_err(|_| StatusCode::PRECONDITION_FAILED)? {
+        ReturnCode::OwnerChanged => { tokio::spawn(gateway::events::room_update(players_ptr.to_owned(), room.clone())); },
+        _ => {},
+    };
     player.room = None;
-    gateway::events::room_players_update(players, &room).await;
+    tokio::spawn(gateway::events::room_players_update(players_ptr.to_owned(), room.clone()));
     Ok(StatusCode::OK)
 
 }
