@@ -1,5 +1,6 @@
 use serde::{ Serialize, Deserialize };
 use sea_orm::prelude::Uuid;
+use std::hash::{Hash, Hasher};
 use std::{ sync::Arc, collections::HashMap };
 use tokio::sync::{ RwLock, broadcast::Sender };
 
@@ -28,7 +29,6 @@ pub struct User {
     login: String,
     display_name: String,
     created_at: i64,
-    pub room: Option<String>,
 }
 
 impl User {
@@ -51,11 +51,16 @@ impl User {
     pub fn created_at(&self) -> &i64 {
         &self.created_at
     }
+}
 
-    pub fn room(&self) -> &Option<String> {
-        &self.room
+impl Eq for User { }
+
+impl PartialEq for User {
+    fn eq(&self, other: &Self) -> bool {
+        self.uuid == other.uuid
     }
 }
+
 
 impl From<entities::accounts::Model> for User {
     fn from(model: entities::accounts::Model) -> Self {
@@ -63,6 +68,12 @@ impl From<entities::accounts::Model> for User {
         let login = model.login;
         let display_name = model.display_name;
         let created_at = model.created_at.timestamp();
-        Self { sender: None, uuid, login, display_name, created_at, room: None }
+        Self { sender: None, uuid, login, display_name, created_at }
+    }
+}
+
+impl Hash for User {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.uuid.hash(state);
     }
 }

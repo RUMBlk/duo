@@ -1,73 +1,52 @@
+pub mod reimpl;
+
 use poem::{handler, http::StatusCode, web::{ self, Data, Json, Path }, Request, Response };
 use sea_orm::{ prelude::Uuid, DatabaseConnection };
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use std::{ sync::Arc, ops::Deref };
-use crate::game::rooms::{self, ReturnCode, Room};
+use std::{ ops::Deref, sync::Arc };
+use crate::Rooms;
+use crate::game::rooms::Interaction;
 use crate::database::queries;
 use crate::gateway;
 
-fn n() -> usize { 100 }
+fn limit() -> usize { 100 }
 
 #[derive(Deserialize)]
 struct RoomQuery {
     #[serde(default)]
-    i: usize,
-    #[serde(default = "n")]
-    n: usize,
-    #[serde(default)]
-    partial: bool,
-}
-
-#[derive(Serialize)]
-struct RoomRow {
-    id: String,
-    #[serde(flatten)]
-    room: Room,
-    players: usize,
-}
-
-impl RoomRow {
-    pub fn new(id: &String, room: &Room, partial: bool) -> Self {
-        let processed_room = match partial {
-            true => room.get_partial(),
-            false => room.clone(),
-        };
-        Self { id: id.clone(), room: processed_room, players: room.number_of_players() }
-    }
+    after: usize,
+    #[serde(default = "limit")]
+    limit: usize,
 }
 
 #[handler]
-pub async fn get_rooms_list(query: web::Query<RoomQuery>, rooms: Data<&Arc<RwLock<rooms::Table>>>) -> Json<Vec<RoomRow>> {
+pub async fn get_rooms_list(query: web::Query<RoomQuery>, rooms: Data<&Arc<RwLock<Rooms>>>) -> Json<Vec<reimpl::RoomWithPlayerCount>> {
     let rooms = rooms.read().await;
-    let mut rooms_vec: Vec<RoomRow> = rooms
+    let mut rooms_vec: Vec<reimpl::RoomWithPlayerCount> = rooms
         .iter()
-        .skip(query.i)
-        .take(query.n)
-        .map(|(id, room)| RoomRow::new(id, room, query.partial))
+        .skip(query.after)
+        .take(query.limit)
+        .map(|room| reimpl::RoomWithPlayerCount::from(room.clone()))
         .collect();
     Json(rooms_vec)
 }
 
-#[derive(Serialize)]
-struct RoomResult {
-    room: Option<Room>,
-    errors: Vec<ReturnCode>
-}
-
-impl RoomResult {
-    pub fn new(room: Option<Room>, errors: Vec<ReturnCode>) -> Self {
-        Self {room, errors}
-    }
+#[derive(Deserialize)]
+struct RoomCreate {
+    name: String,
+    is_public: bool,
+    password: Option<String>,
+    max_players: usize,
 }
 
 #[handler]
 pub async fn create(
     req: &Request,
-    body: Json<Room>,
+    body: Json<RoomCreate>,
     db: Data<&Arc<DatabaseConnection>>,
     players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
 ) -> Result<Response, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
@@ -81,43 +60,37 @@ pub async fn create(
 
     let mut players = players_ptr.read().await;
     let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
-    if let Some(_) = player.room { return Err(StatusCode::FORBIDDEN) };
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = Room::default();
-    let errors: Vec<ReturnCode> = room.batch_update(&body).into_iter().filter_map(|value| {
-        match value {
-            Ok(_) => None,
-            Err(value) => Some(value),
-        }
-    }).collect();
-    let room = if errors.len() == 0 {
-        let _ = room.join(room.password().clone(), player_id);
-        player.room = room.id().clone();
-        let _ = room.set_owner(player_id);
-
-        let id = loop {
-            let id = room.id().clone().unwrap();
-            if rooms.contains_key(&id) { room.regenerate_id(); } 
-            else { break id; }
-        };
-        rooms.insert(id, room.clone());
-        tokio::spawn(gateway::events::room_create(players_ptr.to_owned(), room.clone()));
-        Some(room)
-    } else { None };
+    let mut room = reimpl::Room::create(body.name.clone(), body.is_public, body.password.clone(), player.to_owned(), body.max_players)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    while let Some(_) = rooms.get(&room.0) {
+        room.0.regenerate_id()
+    };
+    rooms.insert(room.0.clone());
     Ok(Response::builder()
-        .body(serde_json::to_string(&RoomResult::new(room, errors)).expect("Failed to serialize RoomResult")))
+        .body(serde_json::to_string(&reimpl::WithPlayers(room)).expect("Failed to serialize RoomResult")))
 
 }
+
+#[derive(Deserialize)]
+struct RoomUpdate {
+    name: Option<String>,
+    is_public: Option<bool>,
+    password: Option<String>,
+    owner: Option<Uuid>,
+    max_players: Option<usize>,
+}
+
 
 #[handler]
 pub async fn update(
     Path(id): Path<String>,
     req: &Request,
-    body: Json<Room>,
+    body: Json<RoomUpdate>,
     db: Data<&Arc<DatabaseConnection>>,
     players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
 ) -> Result<Response, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
@@ -133,18 +106,15 @@ pub async fn update(
     players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?;
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = rooms.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
-    let errors: Vec<ReturnCode> = room.batch_update(&body).into_iter().filter_map(|value| {
-        match value {
-            Ok(_) => None,
-            Err(value) => Some(value),
-        }
-    }).collect();
+    let mut room = rooms.take::<String>(&id).ok_or(StatusCode::NOT_FOUND)?;
 
-    let room = room.clone();
-    tokio::spawn(gateway::events::room_update(players_ptr.to_owned(), room.clone()));
+    if *room.owner() != Some(player_id) { return Err(StatusCode::FORBIDDEN) }
+
+    let mut room = reimpl::Room(room.clone());
+    let result = room.update(body.name.clone(), body.is_public, body.password.clone(), body.owner, body.max_players);
+    rooms.insert(room.0);
     Ok(Response::builder()
-        .body(serde_json::to_string(&RoomResult::new(Some(room), errors)).expect("Failed to serialize RoomResult")))
+        .body(serde_json::to_string(&result).expect("Failed to serialize RoomResult")))
 
 }
 
@@ -160,8 +130,8 @@ pub async fn join(
     body: Json<RoomJoin>,
     db: Data<&Arc<DatabaseConnection>>,
     players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
-) -> Result<Json<Room>, StatusCode> {
+    rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
+) -> Result<Json<reimpl::WithPlayers>, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
         .ok_or(StatusCode::BAD_REQUEST)?
@@ -176,13 +146,13 @@ pub async fn join(
     let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = rooms.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
-    room.join(body.password.clone(), player_id).map_err(|_| StatusCode::FORBIDDEN)?;
-    player.room = Some(id);
-    tokio::spawn(gateway::events::room_players_update(players_ptr.to_owned(), room.clone()));
-    Ok(Json(room.clone()))
+    let mut room = reimpl::Room(rooms.take::<String>(&id).ok_or(StatusCode::NOT_FOUND)?);
+    room.join(body.password.clone(), player.clone()).map_err(|_| StatusCode::FORBIDDEN)?;
+    rooms.insert(room.0.clone());
+    Ok(Json(reimpl::WithPlayers(room)))
 
 }
+
 
 #[handler]
 pub async fn leave(
@@ -190,7 +160,7 @@ pub async fn leave(
     req: &Request,
     db: Data<&Arc<DatabaseConnection>>,
     players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
-    rooms_ptr: Data<&Arc<RwLock<rooms::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
 ) -> Result<StatusCode, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
@@ -206,13 +176,9 @@ pub async fn leave(
     let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = rooms.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
-    match room.leave(player_id).map_err(|_| StatusCode::PRECONDITION_FAILED)? {
-        ReturnCode::OwnerChanged => { tokio::spawn(gateway::events::room_update(players_ptr.to_owned(), room.clone())); },
-        _ => {},
-    };
-    player.room = None;
-    tokio::spawn(gateway::events::room_players_update(players_ptr.to_owned(), room.clone()));
+    let mut room = reimpl::Room(rooms.take::<String>(&id).ok_or(StatusCode::NOT_FOUND)?);
+    room.leave(player.clone()).map_err(|_| StatusCode::FORBIDDEN)?;
+    rooms.insert(room.0.clone());
     Ok(StatusCode::OK)
 
 }

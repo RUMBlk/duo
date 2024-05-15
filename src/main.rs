@@ -3,15 +3,20 @@ mod gateway;
 mod http;
 mod game;
 
+use game::rooms;
 use poem::{
     get, handler, head, middleware::{ AddData, Cors }, patch, post, EndpointExt, Route
 };
+use sea_orm::prelude::Uuid;
 use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 
 use http::*;
+
+pub type Room = rooms::Room<gateway::sessions::User, Uuid>;
+pub type Rooms = HashSet::<Room>;
 
 #[handler]
 fn hello_world() -> &'static str {
@@ -54,7 +59,7 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .with(Cors::new())
             .with(AddData::new(Arc::new(db)))
             .with(AddData::new(Arc::new(RwLock::new(gateway::sessions::Table::new()))))
-            .with(AddData::new(Arc::new(RwLock::new(game::rooms::Table::new()))));
+            .with(AddData::new(Arc::new(RwLock::new(Rooms::new()))));
             Ok(app.into())
         }
         Err(e) => {

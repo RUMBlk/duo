@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 futures-util = "0.3.30"
+json-patch = "2.0.0"
 poem = { version = "3.0.0", features = ["session", "websocket"] }
 random-string = "1.1.0"
 regex = "1.10.4"

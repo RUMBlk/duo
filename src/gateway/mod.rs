@@ -9,7 +9,6 @@ use poem::{
 use serde_json;
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
-use crate::game;
 use tokio::sync::{ broadcast, RwLock };
 use futures_util::StreamExt;
 use payloads::*;
@@ -26,11 +25,9 @@ pub async fn gateway(
     ws: WebSocket,
     db: Data<&Arc<DatabaseConnection>>,
     players: Data<&Arc<RwLock<sessions::Table>>>,
-    rooms: Data<&Arc<RwLock<game::rooms::Table>>>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let db = db.to_owned(); 
     let players = players.to_owned();
-    let rooms = rooms.to_owned();
     let (sender, mut receiver) = broadcast::channel::<String>(12);
     //let mut receivers = sender.subscribe();
 
@@ -51,7 +48,7 @@ pub async fn gateway(
                             if let Ok(request) = request {
                                 match request {
                                     Payload::Identify(payload) =>
-                                        events::identify(db, payload, &players, &rooms, sender.clone()).await,
+                                        events::identify(db, payload, &players, sender.clone()).await,
                                     /*Payload::RoomCreate(payload) => events::room_create(payload, &identity, &rooms, sender.clone()).await,
                                     Payload::RoomUpdate(payload) => events::room_update(payload, &identity, &rooms).await,
                                     Payload::RoomJoin(payload) => 

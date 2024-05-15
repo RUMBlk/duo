@@ -1,6 +1,10 @@
-use serde::{ Serialize, Deserialize };
+use sea_orm::prelude::Uuid;
+use serde::{ Serialize, Deserialize, ser::{ self, SerializeStruct } };
 use serde_json;
-use crate::game::{self, rooms};
+use crate::game;
+use crate::http::rooms::reimpl::*;
+
+use super::sessions::{self, User};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Payload {
@@ -10,9 +14,15 @@ pub enum Payload {
     #[serde(skip_deserializing)]
     Hello(Hello),
     #[serde(skip_deserializing)]
-    RoomPlayersUpdate(RoomPlayersUpdate),
-    RoomCreate(game::rooms::Room),
-    RoomUpdate(game::rooms::Room),
+    RoomPlayerNew(RoomPlayer),
+    #[serde(skip_deserializing)]
+    RoomPlayerUpdate(RoomPlayer),
+    #[serde(skip_deserializing)]
+    RoomPlayerLeft(RoomPlayerInfo),
+    #[serde(skip_deserializing)]
+    RoomCreate(WithPlayers),
+    #[serde(skip_deserializing)]
+    RoomUpdate(Room),
     //From Server/Client
     Identify(Identify),
     Ready(super::sessions::User),
@@ -60,19 +70,51 @@ impl Identify {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub struct RoomPlayersUpdate {
-    id: Option<String>,
-    players: rooms::Players,
+#[derive(Debug)]
+pub struct Player(game::rooms::Player<sessions::User>);
+impl ser::Serialize for Player {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: ser::Serializer {
+        let mut state = serializer.serialize_struct("player", 3)?;
+        state.serialize_field("data", &self.0.data)?;
+        state.serialize_field("is_ready", &self.0.is_ready)?;
+        state.serialize_field("points", &self.0.points)?;
+        state.end()
+    }
 }
 
-impl From<rooms::Room> for RoomPlayersUpdate {
-    fn from(value: rooms::Room) -> Self {
+impl From<game::rooms::Player<sessions::User>> for Player {
+    fn from(value: game::rooms::Player<sessions::User>) -> Self {
+        Self { 0: value }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoomPlayer {
+    room_id: String,
+    player: Player,
+}
+
+impl RoomPlayer {
+    pub fn from_room(room: crate::Room, player_query: User) -> Self {
         Self {
-            id: value.id().clone(),
-            players: value.players().clone(),
+            room_id: room.id().clone(),
+            player: Player::from(room.players().get::<sessions::User>(&player_query).cloned().unwrap()),
         }
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct RoomPlayerInfo {
+    room_id: String,
+    player_id: Uuid,
+}
 
+impl RoomPlayerInfo {
+    pub fn new(room_id: String, player_id: Uuid) -> Self {
+        Self {
+            room_id,
+            player_id,
+        }
+    }
+}

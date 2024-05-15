@@ -1,89 +1,123 @@
-use serde::{ Serialize, Deserialize };
-use sea_orm::prelude::Uuid;
-use std::collections::{ HashMap, hash_map::Keys };
+use std::{borrow::Borrow, collections::HashSet, hash::Hash};
 use random_string;
+use serde::Serialize;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ReturnCode {
-    OK,
+#[derive(Debug, Serialize)]
+pub enum Error<'a> {
     PlayerAlreadyInRoom,
     PlayerNotInRoom,
-    InvalidName,
-    InvalidPassword,
-    NoOwner,
-    OwnerChanged,
+    BadArgument(&'a str),
+    Forbidden(&'a str),
     Full,
-    MaxPlayersNotSet,
-    MaxPlayersCantBeLowerThan(usize),
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct Player {
-    is_ready: bool,
-    points: u64,
+#[derive(Debug, Clone, Eq, Serialize)]
+pub struct Player<PlayerData>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    pub data: PlayerData,
+    pub is_ready: bool,
+    pub points: u64,
 }
 
-impl Player {
-    pub fn new() -> Self {
-        Self { is_ready: false, points: 0 }
+impl<PlayerData> Player<PlayerData> 
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    pub fn new(data: PlayerData) -> Self {
+        Self { data, is_ready: false, points: 0 }
     }
 }
 
-pub type Table = HashMap::<String, Room>;
-pub type Players = HashMap<Uuid, Player>;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Room {
-    id: Option<String>,
-    name: Option<String>,
-    pub is_public: Option<bool>,
-    password: Option<String>,
-    owner: Option<Uuid>,
-    max_players: Option<usize>,
-    #[serde(skip_deserializing)]
-    players: Players,
+impl<PlayerData> From<PlayerData> for Player<PlayerData>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn from(value: PlayerData) -> Self {
+        Self::new(value)
+    }
 }
 
-impl Default for Room {
+impl<PlayerData> PartialEq for Player<PlayerData> 
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+}
+
+impl<PlayerData> Hash for Player<PlayerData> 
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
+    }
+}
+
+impl<PlayerData> Borrow<PlayerData> for Player<PlayerData>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn borrow(&self) -> &PlayerData {
+        &self.data
+    }
+}
+
+#[derive(Debug, Clone, Eq)]
+pub struct Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    id: String,
+    name: String,
+    pub is_public: bool,
+    password: Option<String>,
+    owner: Option<Ownership>,
+    max_players: usize,
+    players: HashSet<Player<PlayerData>>,
+}
+
+impl<PlayerData, Ownership> Borrow<String> for Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn borrow(&self) -> &String {
+        &self.id
+    }
+}
+
+impl<PlayerData, Ownership> PartialEq for Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+
+impl<PlayerData, Ownership> Hash for Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl<PlayerData, Ownership> Default for Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
     fn default() -> Self {
         Self {
-            id: Some(Self::generate_id()),
-            name: Some(String::from("Room")),
-            is_public: Some(false),
+            id: Self::generate_id(),
+            name: String::from("Room"),
+            is_public: false,
             password: None,
             owner: None,
-            max_players: Some(2),
-            players: HashMap::new(),
+            max_players: 2,
+            players: HashSet::new(),
         }
     }
 }
 
-impl Room {
-    pub fn new(name: Option<String>, is_public: Option<bool>, password: Option<String>, owner: Option<Uuid>, max_players: Option<usize>) -> Self {
-        Self { 
-            id: Some(Self::generate_id()),
-            name,
-            is_public,
-            password,
-            owner,
-            max_players,
-            players: HashMap::new()
-        }
-    }
-
+impl<PlayerData, Ownership> Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
     pub fn generate_id() -> String {
         random_string::generate(6, "0123456789")
     }
 
     pub fn regenerate_id(&mut self) {
-        self.id = Some(Self::generate_id())
+        self.id = Self::generate_id()
     }
 
-    pub fn id(&self) -> &Option<String> {
+    pub fn id(&self) -> &String {
         &self.id
     }
 
-    pub fn name(&self) -> &Option<String> {
+    pub fn name(&self) -> &String {
         &self.name
     }
 
@@ -91,102 +125,81 @@ impl Room {
         &self.password
     }
 
-    pub fn owner(&self) -> &Option<Uuid> {
+    pub fn owner(&self) -> &Option<Ownership> {
         &self.owner
     }
 
-    pub fn max_players(&self) -> &Option<usize> {
+    pub fn max_players(&self) -> &usize {
         &self.max_players
     }
 
-    pub fn player_ids(&self) -> Keys<'_, Uuid, Player>{ 
-        self.players.keys()
-    }
-
-    pub fn players(&self) -> &Players {
+    pub fn players(&self) -> &HashSet<Player<PlayerData>> {
         &self.players
     }
 
-    pub fn player(&mut self, player_id: Uuid) -> Option<&mut Player> {
-        self.players.get_mut(&player_id)
+    pub fn players_mut(&mut self) -> &mut HashSet<Player<PlayerData>> {
+        &mut self.players
+    }
+}
+
+pub trait Interaction<'a, 'b, PlayerData, Ownership> {
+    fn set_name(&'a mut self, name: String) -> Result<(), Error<'b>>;
+    fn set_password(&'a mut self, password: Option<String>) -> Result<(), Error<'b>>;
+    fn set_owner(&'a mut self, ownership: Ownership) -> Result<(), Error<'b>>;
+    fn set_max_players(&'a mut self, max_players: usize) -> Result<(), Error<'b>>;
+    fn join(&'a mut self, password: Option<String>, player: PlayerData) -> Result<(), Error<'b>>;
+    fn leave(&'a mut self, player: PlayerData) -> Result<(), Error<'b>>;
+}
+
+impl<'a, 'b, PlayerData, Ownership> Interaction<'a, 'b, PlayerData, Ownership> for Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash + Borrow<PlayerData> {
+    fn set_name(&mut self, name: String) -> Result<(), Error<'b>> {
+        if !name.is_empty() { self.name = name; }
+        else { return Err(Error::BadArgument("name can't be an empty string")) }
+        Ok(())
     }
 
-    pub fn set_name(&mut self, name: String) -> Result<ReturnCode, ReturnCode> {
-        if !name.is_empty() { self.name = Some(name); }
-        else { return Err(ReturnCode::InvalidName) }
-        Ok(ReturnCode::OK)
-    }
-
-    pub fn set_password(&mut self, password: Option<String>) -> Result<ReturnCode, ReturnCode> {
+    fn set_password(&mut self, password: Option<String>) -> Result<(), Error<'b>> {
         if let Some(ref pass) = password {
             if pass.len() < 32 { 
                 self.password = if pass.is_empty() { None } else { password }
             }
-            else { return Err(ReturnCode::InvalidPassword) }
+            else { return Err(Error::BadArgument("password can't be longer than 32 characters")) }
         }
-        Ok(ReturnCode::OK)
+        Ok(())
     }
 
-    pub fn set_owner(&mut self, player_id: Uuid) -> Result<ReturnCode, ReturnCode> {
-        if self.players.contains_key(&player_id) { self.owner = Some(player_id); }
-        else { return Err(ReturnCode::PlayerNotInRoom) };
-        Ok(ReturnCode::OK)
+    fn set_owner(&mut self, ownership: Ownership) -> Result<(), Error<'b>> {
+        self.owner = Some(ownership);
+        Ok(())
     }
 
-    pub fn set_max_players(&mut self, max_players: usize) -> Result<ReturnCode, ReturnCode> {
-        if max_players < 2 { return Err( ReturnCode::MaxPlayersCantBeLowerThan(Self::default().max_players.unwrap()) ) }
-        else { self.max_players = Some(max_players) }
-        Ok(ReturnCode::OK)
+    fn set_max_players(&mut self, max_players: usize) -> Result<(), Error<'b>> {
+        if max_players < 2 { return Err( Error::BadArgument("max_players can't be lower than 2") ) }
+        else { self.max_players = max_players }
+        Ok(())
     }
 
-    pub fn batch_update(&mut self, from: &Self) -> Vec<Result<ReturnCode, ReturnCode>> {
-        let mut errors = Vec::new();
-        if let Some(value) = &from.name { errors.push( self.set_name(value.to_owned())) };
-        if let Some(value) = from.is_public { self.is_public = Some(value); };
-        errors.push( self.set_password(from.password.clone()));
-        if let Some(value) = from.owner { errors.push( self.set_owner(value)) };
-        if let Some(value) = from.max_players { errors.push( self.set_max_players(value)) };
-        errors
-    }
-
-    pub fn join(&mut self, password: Option<String>, player_id: Uuid) -> Result<ReturnCode, ReturnCode> {
+    fn join(&mut self, password: Option<String>, player: PlayerData) -> Result<(), Error<'b>> {
         if let Some(pass) = &self.password {
             if Some(pass) != password.as_ref() {
-                return Err(ReturnCode::InvalidPassword);
+                return Err(Error::Forbidden("Wrong password"));
             }
         }
-        let max_players = self.max_players.ok_or(ReturnCode::MaxPlayersNotSet)?;
-        if self.players.len() >= max_players {
-            return Err(ReturnCode::Full)
+        if self.players.len() >= self.max_players {
+            return Err(Error::Full)
         }
 
-        if self.players.contains_key(&player_id) { return Err(ReturnCode::PlayerAlreadyInRoom) }
-        self.players.insert(player_id, Player::new());
-        Ok(ReturnCode::OK)
+        let player = Player::from(player);
+        if self.players.contains(&player) { return Err(Error::PlayerAlreadyInRoom) }
+        self.players.insert(player);
+        Ok(())
     }
 
-    pub fn leave(&mut self, player_id: Uuid) -> Result<ReturnCode, ReturnCode> {
-        self.players.remove(&player_id).ok_or(ReturnCode::PlayerNotInRoom)?;
-        if self.owner == Some(player_id) { 
-            let next_owner = self.players.iter().next()
-                .ok_or(ReturnCode::NoOwner)?;
-            self.owner = Some(*next_owner.0);
-            Ok(ReturnCode::OwnerChanged)
-        } else { Ok(ReturnCode::OK) }
+    fn leave(&mut self, player: PlayerData) -> Result<(), Error<'b>> {
+        if !self.players_mut().remove::<PlayerData>(&player) {
+            return Err(Error::PlayerNotInRoom);
+        };
+        Ok(())
     }
-
-    pub fn contains_player(&self, player_id: Uuid) -> bool {
-        self.players.contains_key(&player_id)
-    }
-
-    pub fn number_of_players(&self) -> usize {
-        self.players.len()
-    }
-
-    pub fn get_partial(&self) -> Self {
-        let mut room = self.clone();
-        room.players = HashMap::new();
-        room
-    }
-
 }
