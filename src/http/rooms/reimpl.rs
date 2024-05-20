@@ -1,12 +1,12 @@
-use std::hash::Hash;
 
 use serde::{ ser::SerializeStruct, Serialize };
 use sea_orm::prelude::Uuid;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::{game::rooms::*, gateway::payloads::RoomPlayerInfo};
 use crate::gateway::sessions::User;
 use crate::gateway::payloads::{ Payload, RoomPlayer };
-use tokio::sync::broadcast::Sender;
 
 use super::player;
 
@@ -14,8 +14,9 @@ use super::player;
 pub struct Room(pub crate::Room);
 
 impl Room {
-    pub fn create<'a>(name: String, is_public: bool, password: Option<String>, owner: User, max_players: usize) -> Result<Self, Error<'a>> {
+    pub fn create<'a>(stored_in: Arc<RwLock<crate::Rooms>>, name: String, is_public: bool, password: Option<String>, owner: User, max_players: usize) -> Result<Self, Error<'a>> {
         let mut room = Self(crate::Room::default());
+        room.0.stored_in = Some(stored_in);
         room.0.set_name(name)?;
         room.0.is_public = is_public;
         room.0.set_password(password.clone())?;
@@ -48,7 +49,7 @@ impl Room {
     async fn announce(&mut self, payload: Payload ) {
         for player in self.0.players().clone() {
             if let Err(_) = player.data.sender().send(payload.to_json_string()) {
-                self.leave(player.data);
+                let _ = self.leave(player.data);
             }
         }
     }
@@ -115,6 +116,9 @@ impl<'a, 'b> Interaction<'a, 'b, player::Data, Uuid> for Room {
         let room = self.clone();
         tokio::spawn(async move {
             room.clone().announce(Payload::RoomPlayerLeft(RoomPlayerInfo::new(room.0.id().to_owned(), player.id().to_owned()))).await;
+            if let Some(ref rooms) = room.0.stored_in {
+                rooms.write().await.remove(&room.0);
+            }
         });
         Ok(())
     }

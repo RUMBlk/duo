@@ -3,9 +3,7 @@ use std::hash::Hash;
 use serde::{ ser::SerializeStruct, Serialize };
 use sea_orm::prelude::Uuid;
 
-use crate::{game::rooms::*, gateway::payloads::RoomPlayerInfo};
 use crate::gateway::sessions::User;
-use crate::gateway::payloads::{ Payload, RoomPlayer };
 use tokio::sync::broadcast::Sender;
 
 #[derive(Debug, Clone)]

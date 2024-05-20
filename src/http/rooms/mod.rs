@@ -61,14 +61,18 @@ pub async fn create(
 
     let mut players = players_ptr.read().await;
     let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
+    if let Some(_) = &player.room {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = reimpl::Room::create(body.name.clone(), body.is_public, body.password.clone(), player.to_owned(), body.max_players)
+    let mut room = reimpl::Room::create(rooms_ptr.to_owned(), body.name.clone(), body.is_public, body.password.clone(), player.to_owned(), body.max_players)
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     while let Some(_) = rooms.get(&room.0) {
         room.0.regenerate_id()
     };
     rooms.insert(room.0.clone());
+    player.room = Some(room.0.id().clone());
     Ok(Response::builder()
         .body(serde_json::to_string(&room).expect("Failed to serialize RoomResult")))
 
@@ -145,11 +149,17 @@ pub async fn join(
 
     let mut players = players_ptr.write().await;
     let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
+    if let Some(room) = &player.room {
+        if id != *room {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
 
     let mut rooms = rooms_ptr.write().await;
     let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
     room.join(body.password.clone(), player.clone().into()).map_err(|_| StatusCode::FORBIDDEN)?;
     rooms.insert(room.0.clone());
+    player.room = Some(room.0.id().clone());
     Ok(Json(room))
 }
 
@@ -178,10 +188,6 @@ pub async fn leave(
     let mut rooms = rooms_ptr.write().await;
     let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
     room.leave(player.clone().into()).map_err(|_| StatusCode::FORBIDDEN)?;
-    if room.0.players().len() > 0 {
-        rooms.insert(room.0.clone());
-    } else {
-        rooms.remove(&room.0);
-    }
+    player.room = None;
     Ok(StatusCode::OK)
 }

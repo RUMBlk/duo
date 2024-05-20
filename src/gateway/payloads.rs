@@ -4,8 +4,6 @@ use serde_json;
 use crate::{game, http};
 use crate::http::rooms::reimpl::*;
 
-use super::sessions::{self, User};
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Payload {
     //From Server
@@ -72,7 +70,7 @@ impl Identify {
 }
 
 #[derive(Debug)]
-pub struct Player(game::rooms::Player<http::rooms::player::Data>);
+pub struct Player(game::player::Player<http::rooms::player::Data>);
 impl ser::Serialize for Player {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: ser::Serializer {
@@ -84,8 +82,8 @@ impl ser::Serialize for Player {
     }
 }
 
-impl From<game::rooms::Player<http::rooms::player::Data>> for Player {
-    fn from(value: game::rooms::Player<http::rooms::player::Data>) -> Self {
+impl From<game::player::Player<http::rooms::player::Data>> for Player {
+    fn from(value: game::player::Player<http::rooms::player::Data>) -> Self {
         Self { 0: value }
     }
 }

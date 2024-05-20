@@ -29,6 +29,8 @@ pub struct User {
     login: String,
     display_name: String,
     created_at: i64,
+    #[serde(skip)]
+    pub room: Option<String>,
 }
 
 impl User {
@@ -38,7 +40,8 @@ impl User {
             uuid: account.uuid,
             login: account.login,
             display_name: account.display_name,
-            created_at: account.created_at.timestamp()
+            created_at: account.created_at.timestamp(),
+            room: None,
         }
     }
 

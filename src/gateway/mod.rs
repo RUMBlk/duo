@@ -7,9 +7,10 @@ use poem::{
     handler, http::StatusCode, web::{ websocket::{Message, WebSocket }, Data }, IntoResponse
 };
 use serde_json;
-use sea_orm::DatabaseConnection;
-use std::sync::Arc;
+use sea_orm::{prelude::Uuid, DatabaseConnection};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{ broadcast, RwLock };
+use tokio::time::sleep;
 use futures_util::StreamExt;
 use payloads::*;
 
@@ -30,7 +31,6 @@ pub async fn gateway(
     let players = players.to_owned();
     let (sender, mut receiver) = broadcast::channel::<String>(12);
     //let mut receivers = sender.subscribe();
-
     Ok(
         ws.on_upgrade(move |mut socket| async move {
             let (mut sink, mut stream) = socket.split();
@@ -38,6 +38,7 @@ pub async fn gateway(
             let _ = sink.send(Message::Text(serde_json::to_string(&hello).unwrap_or_default())).await;
 
             tokio::spawn(async move {
+                let mut user_id: Option<Uuid> = None; 
                 let db = db.as_ref();
                 //let mut rooms = rooms.write().unwrap();
                 while let Some(Ok(msg)) = stream.next().await {
@@ -48,7 +49,7 @@ pub async fn gateway(
                             if let Ok(request) = request {
                                 match request {
                                     Payload::Identify(payload) =>
-                                        events::identify(db, payload, &players, sender.clone()).await,
+                                        events::identify(db, payload, &players, sender.clone(), &mut user_id).await,
                                     /*Payload::RoomCreate(payload) => events::room_create(payload, &identity, &rooms, sender.clone()).await,
                                     Payload::RoomUpdate(payload) => events::room_update(payload, &identity, &rooms).await,
                                     Payload::RoomJoin(payload) => 
@@ -64,6 +65,16 @@ pub async fn gateway(
                         let _ = sender.send(payload.to_json_string());
                         //let _ = sink.send(Message::Text(serde_json::to_string(&payload).unwrap_or_default())).await;
                     }
+                }
+                if let Some(user_id) = user_id {
+                    let _ = sleep(Duration::from_secs(60));
+                    let mut players = players.write().await;
+                    let mut disconnect = false;
+                    if let Some(player) = players.get(&user_id) {
+                        let player = player.read().await;
+                        disconnect = sender.same_channel(&player.sender);
+                    }
+                    if disconnect { players.remove(&user_id); }
                 }
             });
 

@@ -12,6 +12,7 @@ pub async fn identify(
     payload: Identify,
     players: &Arc<RwLock<super::sessions::Table>>,
     sender: Sender<String>,
+    store_in: &mut Option<Uuid>,
 ) -> Result<Payload, Error> {
     let token = Uuid::parse_str(payload.token().as_str()).map_err(|_| Error::BadToken)?;
     let uuid = queries::sessions::get_account_uuid(token).one(db).await
@@ -27,11 +28,12 @@ pub async fn identify(
         let account = queries::accounts::by_uuid(uuid).one(db).await
             .map_err(|_| Error::InternalServerError)?
             .ok_or(Error::InvalidToken)?;
-        let mut player = super::sessions::User::from_account(account, sender);
+        let player = super::sessions::User::from_account(account, sender);
         players.insert(uuid, Arc::new(RwLock::new(player.clone())));
         player
 
     };
+    *store_in = Some(player.uuid().clone());
     Ok(Payload::Ready(player))
 }
 

@@ -1,6 +1,9 @@
 use std::{borrow::Borrow, collections::HashSet, hash::Hash};
+use tokio::sync::RwLock;
 use random_string;
 use serde::Serialize;
+use std::sync::Arc;
+use super::player::Player;
 
 #[derive(Debug, Serialize)]
 pub enum Error<'a> {
@@ -11,52 +14,10 @@ pub enum Error<'a> {
     Full,
 }
 
-#[derive(Debug, Clone, Eq, Serialize)]
-pub struct Player<PlayerData>
-where PlayerData: PartialEq + std::cmp::Eq + Hash {
-    pub data: PlayerData,
-    pub is_ready: bool,
-    pub points: u64,
-}
-
-impl<PlayerData> Player<PlayerData> 
-where PlayerData: PartialEq + std::cmp::Eq + Hash {
-    pub fn new(data: PlayerData) -> Self {
-        Self { data, is_ready: false, points: 0 }
-    }
-}
-
-impl<PlayerData> From<PlayerData> for Player<PlayerData>
-where PlayerData: PartialEq + std::cmp::Eq + Hash {
-    fn from(value: PlayerData) -> Self {
-        Self::new(value)
-    }
-}
-
-impl<PlayerData> PartialEq for Player<PlayerData> 
-where PlayerData: PartialEq + std::cmp::Eq + Hash {
-    fn eq(&self, other: &Self) -> bool {
-        self.data == other.data
-    }
-}
-
-impl<PlayerData> Hash for Player<PlayerData> 
-where PlayerData: PartialEq + std::cmp::Eq + Hash {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.data.hash(state);
-    }
-}
-
-impl<PlayerData> Borrow<PlayerData> for Player<PlayerData>
-where PlayerData: PartialEq + std::cmp::Eq + Hash {
-    fn borrow(&self) -> &PlayerData {
-        &self.data
-    }
-}
-
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone)]
 pub struct Room<PlayerData, Ownership>
 where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    pub stored_in: Option<Arc<RwLock<HashSet<Room<PlayerData, Ownership>>>>>,
     id: String,
     name: String,
     pub is_public: bool,
@@ -72,6 +33,15 @@ where PlayerData: PartialEq + std::cmp::Eq + Hash {
         &self.id
     }
 }
+impl<PlayerData, Ownership> Borrow<Option<Ownership>> for Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash {
+    fn borrow(&self) -> &Option<Ownership> {
+        &self.owner
+    }
+}
+
+impl<PlayerData, Ownership> Eq for Room<PlayerData, Ownership>
+where PlayerData: PartialEq + std::cmp::Eq + Hash { }
 
 impl<PlayerData, Ownership> PartialEq for Room<PlayerData, Ownership>
 where PlayerData: PartialEq + std::cmp::Eq + Hash {
@@ -79,7 +49,6 @@ where PlayerData: PartialEq + std::cmp::Eq + Hash {
         self.id == other.id
     }
 }
-
 
 impl<PlayerData, Ownership> Hash for Room<PlayerData, Ownership>
 where PlayerData: PartialEq + std::cmp::Eq + Hash {
@@ -92,6 +61,7 @@ impl<PlayerData, Ownership> Default for Room<PlayerData, Ownership>
 where PlayerData: PartialEq + std::cmp::Eq + Hash {
     fn default() -> Self {
         Self {
+            stored_in: None,
             id: Self::generate_id(),
             name: String::from("Room"),
             is_public: false,
@@ -191,7 +161,7 @@ where PlayerData: PartialEq + std::cmp::Eq + Hash + Borrow<PlayerData> {
         }
 
         let player = Player::from(player);
-        if self.players.contains(&player) { return Err(Error::PlayerAlreadyInRoom) }
+        //if self.players.contains(&player) { return Err(Error::PlayerAlreadyInRoom) }
         self.players.insert(player);
         Ok(())
     }
