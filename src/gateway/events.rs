@@ -27,8 +27,7 @@ pub async fn identify(
         let account = queries::accounts::by_uuid(uuid).one(db).await
             .map_err(|_| Error::InternalServerError)?
             .ok_or(Error::InvalidToken)?;
-        let mut player = super::sessions::User::from(account);
-        player.set_sender(sender);
+        let mut player = super::sessions::User::from_account(account, sender);
         players.insert(uuid, Arc::new(RwLock::new(player.clone())));
         player
 

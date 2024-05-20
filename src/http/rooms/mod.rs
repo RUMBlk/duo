@@ -1,4 +1,5 @@
 pub mod reimpl;
+pub mod player;
 
 use poem::{handler, http::StatusCode, web::{ self, Data, Json, Path }, Request, Response };
 use sea_orm::{ prelude::Uuid, DatabaseConnection };
@@ -21,13 +22,13 @@ struct RoomQuery {
 }
 
 #[handler]
-pub async fn get_rooms_list(query: web::Query<RoomQuery>, rooms: Data<&Arc<RwLock<Rooms>>>) -> Json<Vec<reimpl::RoomWithPlayerCount>> {
+pub async fn get_rooms_list(query: web::Query<RoomQuery>, rooms: Data<&Arc<RwLock<Rooms>>>) -> Json<Vec<reimpl::RoomPartial>> {
     let rooms = rooms.read().await;
-    let mut rooms_vec: Vec<reimpl::RoomWithPlayerCount> = rooms
+    let mut rooms_vec: Vec<reimpl::RoomPartial> = rooms
         .iter()
         .skip(query.after)
         .take(query.limit)
-        .map(|room| reimpl::RoomWithPlayerCount::from(room.clone()))
+        .map(|room| reimpl::RoomPartial(room.clone()))
         .collect();
     Json(rooms_vec)
 }
@@ -69,7 +70,7 @@ pub async fn create(
     };
     rooms.insert(room.0.clone());
     Ok(Response::builder()
-        .body(serde_json::to_string(&reimpl::WithPlayers(room)).expect("Failed to serialize RoomResult")))
+        .body(serde_json::to_string(&room).expect("Failed to serialize RoomResult")))
 
 }
 
@@ -106,7 +107,7 @@ pub async fn update(
     players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?;
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = rooms.take::<String>(&id).ok_or(StatusCode::NOT_FOUND)?;
+    let mut room = rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?;
 
     if *room.owner() != Some(player_id) { return Err(StatusCode::FORBIDDEN) }
 
@@ -131,7 +132,7 @@ pub async fn join(
     db: Data<&Arc<DatabaseConnection>>,
     players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
     rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
-) -> Result<Json<reimpl::WithPlayers>, StatusCode> {
+) -> Result<Json<reimpl::Room>, StatusCode> {
     let auth = Uuid::parse_str(
         req.header("authorization")
         .ok_or(StatusCode::BAD_REQUEST)?
@@ -146,11 +147,10 @@ pub async fn join(
     let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = reimpl::Room(rooms.take::<String>(&id).ok_or(StatusCode::NOT_FOUND)?);
-    room.join(body.password.clone(), player.clone()).map_err(|_| StatusCode::FORBIDDEN)?;
+    let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
+    room.join(body.password.clone(), player.clone().into()).map_err(|_| StatusCode::FORBIDDEN)?;
     rooms.insert(room.0.clone());
-    Ok(Json(reimpl::WithPlayers(room)))
-
+    Ok(Json(room))
 }
 
 
@@ -176,9 +176,12 @@ pub async fn leave(
     let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = reimpl::Room(rooms.take::<String>(&id).ok_or(StatusCode::NOT_FOUND)?);
-    room.leave(player.clone()).map_err(|_| StatusCode::FORBIDDEN)?;
-    rooms.insert(room.0.clone());
+    let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
+    room.leave(player.clone().into()).map_err(|_| StatusCode::FORBIDDEN)?;
+    if room.0.players().len() > 0 {
+        rooms.insert(room.0.clone());
+    } else {
+        rooms.remove(&room.0);
+    }
     Ok(StatusCode::OK)
-
 }

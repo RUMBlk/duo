@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 
 use http::*;
 
-pub type Room = rooms::Room<gateway::sessions::User, Uuid>;
+pub type Room = rooms::Room<http::rooms::player::Data, Uuid>;
 pub type Rooms = HashSet::<Room>;
 
 #[handler]

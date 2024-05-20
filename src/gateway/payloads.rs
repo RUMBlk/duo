@@ -1,7 +1,7 @@
 use sea_orm::prelude::Uuid;
 use serde::{ Serialize, Deserialize, ser::{ self, SerializeStruct } };
 use serde_json;
-use crate::game;
+use crate::{game, http};
 use crate::http::rooms::reimpl::*;
 
 use super::sessions::{self, User};
@@ -20,11 +20,12 @@ pub enum Payload {
     #[serde(skip_deserializing)]
     RoomPlayerLeft(RoomPlayerInfo),
     #[serde(skip_deserializing)]
-    RoomCreate(WithPlayers),
+    RoomCreate(Room),
     #[serde(skip_deserializing)]
     RoomUpdate(Room),
     //From Server/Client
     Identify(Identify),
+    #[serde(skip_deserializing)]
     Ready(super::sessions::User),
     /*//From Client
     RoomJoin(RoomJoin),
@@ -71,7 +72,7 @@ impl Identify {
 }
 
 #[derive(Debug)]
-pub struct Player(game::rooms::Player<sessions::User>);
+pub struct Player(game::rooms::Player<http::rooms::player::Data>);
 impl ser::Serialize for Player {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: ser::Serializer {
@@ -83,8 +84,8 @@ impl ser::Serialize for Player {
     }
 }
 
-impl From<game::rooms::Player<sessions::User>> for Player {
-    fn from(value: game::rooms::Player<sessions::User>) -> Self {
+impl From<game::rooms::Player<http::rooms::player::Data>> for Player {
+    fn from(value: game::rooms::Player<http::rooms::player::Data>) -> Self {
         Self { 0: value }
     }
 }
@@ -96,10 +97,10 @@ pub struct RoomPlayer {
 }
 
 impl RoomPlayer {
-    pub fn from_room(room: crate::Room, player_query: User) -> Self {
+    pub fn from_room(room: crate::Room, player_query: http::rooms::player::Data) -> Self {
         Self {
             room_id: room.id().clone(),
-            player: Player::from(room.players().get::<sessions::User>(&player_query).cloned().unwrap()),
+            player: Player::from(room.players().get::<http::rooms::player::Data>(&player_query).cloned().unwrap()),
         }
     }
 }

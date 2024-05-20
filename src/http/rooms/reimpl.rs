@@ -1,9 +1,14 @@
+use std::hash::Hash;
+
 use serde::{ ser::SerializeStruct, Serialize };
 use sea_orm::prelude::Uuid;
 
 use crate::{game::rooms::*, gateway::payloads::RoomPlayerInfo};
 use crate::gateway::sessions::User;
 use crate::gateway::payloads::{ Payload, RoomPlayer };
+use tokio::sync::broadcast::Sender;
+
+use super::player;
 
 #[derive(Debug, Clone)]
 pub struct Room(pub crate::Room);
@@ -15,11 +20,11 @@ impl Room {
         room.0.is_public = is_public;
         room.0.set_password(password.clone())?;
         room.0.set_max_players(max_players)?;
-        room.0.join(password, owner.clone())?;
+        room.0.join(password, owner.clone().into())?;
         room.0.set_owner(owner.uuid().clone())?;
         let thread_room = room.clone();
         tokio::spawn(async move {
-            thread_room.clone().announce(Payload::RoomCreate(WithPlayers(thread_room))).await;
+            thread_room.clone().announce(Payload::RoomCreate(thread_room)).await;
         });
         Ok(room)
     }
@@ -40,10 +45,10 @@ impl Room {
         result
     }
 
-    async fn announce(self, payload: Payload ) {
+    async fn announce(&mut self, payload: Payload ) {
         for player in self.0.players().clone() {
-            if let Some(sender) = &player.data.sender {
-                let _ = sender.send(payload.to_json_string());
+            if let Err(_) = player.data.sender().send(payload.to_json_string()) {
+                self.leave(player.data);
             }
         }
     }
@@ -55,7 +60,7 @@ impl From<crate::Room> for Room {
     }
 }
 
-impl<'a, 'b> Interaction<'a, 'b, User, Uuid> for Room {
+impl<'a, 'b> Interaction<'a, 'b, player::Data, Uuid> for Room {
     fn set_name(&mut self, name: String) -> Result<(), Error<'b>> {
         self.0.set_name(name)?;
         let room = self.clone();
@@ -92,26 +97,24 @@ impl<'a, 'b> Interaction<'a, 'b, User, Uuid> for Room {
         Ok(())
     }
 
-    fn join(&mut self, password: Option<String>, player: User) -> Result<(), Error<'b>> {
+    fn join(&mut self, password: Option<String>, player: player::Data) -> Result<(), Error<'b>> {
         self.0.join(password, player.clone())?;
         let room = self.clone();
         tokio::spawn(async move {
-            if let Some(ref sender) = player.sender {
-                let _ = sender.send(Payload::RoomCreate(WithPlayers(room.clone())).to_json_string());
-            }
+            let _ = player.sender().send(Payload::RoomCreate(room.clone()).to_json_string());
             room.clone().announce(Payload::RoomPlayerNew(RoomPlayer::from_room(room.0, player))).await;
         });
         Ok(())
     }
 
-    fn leave(&mut self, player: User) -> Result<(), Error<'b>> {
-        if *self.0.owner() == Some(*player.uuid()) {
+    fn leave(&mut self, player: player::Data) -> Result<(), Error<'b>> {
+        if *self.0.owner() == Some(*player.id()) {
             return Err(Error::Forbidden("Owners can't leave their room, consider to transfer ownership or delete the room"))
         }
-        self.0.players_mut().remove(&player);
+        self.0.players_mut().remove(&player::Data::from(player.clone()));
         let room = self.clone();
         tokio::spawn(async move {
-            room.clone().announce(Payload::RoomPlayerLeft(RoomPlayerInfo::new(room.0.id().to_owned(), player.uuid().to_owned()))).await;
+            room.clone().announce(Payload::RoomPlayerLeft(RoomPlayerInfo::new(room.0.id().to_owned(), player.id().to_owned()))).await;
         });
         Ok(())
     }
@@ -126,47 +129,25 @@ impl Serialize for Room {
         state.serialize_field("is_public", &self.0.is_public)?;
         state.serialize_field("password", self.0.password())?;
         state.serialize_field("owner", self.0.owner())?;
-        state.serialize_field("max_playes", self.0.max_players())?;
+        state.serialize_field("max_players", self.0.max_players())?;
+        state.serialize_field("players", &self.0.players())?;
         state.end()
     }
 }
 
-#[derive(Serialize)]
-pub struct RoomWithPlayerCount {
-    #[serde(flatten)]
-    room: Room,
-    players: usize,
-}
+pub struct RoomPartial(pub crate::Room);
 
-impl RoomWithPlayerCount {
-    pub fn new(room: Room, players: usize) -> Self {
-        Self { room, players }
-    }
-}
-
-impl From<crate::Room> for RoomWithPlayerCount {
-    fn from(value: crate::Room) -> Self {
-        let players = value.players().len();
-        Self::new(Room(value), players)
-    }
-}
-
-impl From<Room> for RoomWithPlayerCount {
-    fn from(value: Room) -> Self {
-        let players = value.0.players().len();
-        Self::new(value, players)
-    }
-}
-
-#[derive(Debug)]
-pub struct WithPlayers(pub Room);
-impl Serialize for WithPlayers {
+impl Serialize for RoomPartial {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
-        let mut state = serializer.serialize_struct("room", 2)?;
-        state.serialize_field("room", &self.0)?;
-        state.serialize_field("players", &self.0.0.players())?;
+    where S: serde::Serializer {
+        let mut state = serializer.serialize_struct("room", 6)?;
+        state.serialize_field("id", self.0.id())?;
+        state.serialize_field("name", self.0.name())?;
+        state.serialize_field("is_public", &self.0.is_public)?;
+        state.serialize_field("password", &self.0.password().is_some() )?;
+        state.serialize_field("owner", self.0.owner())?;
+        state.serialize_field("max_players", self.0.max_players())?;
+        state.serialize_field("players", &self.0.players().len())?;
         state.end()
     }
 }

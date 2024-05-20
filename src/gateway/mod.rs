@@ -69,6 +69,7 @@ pub async fn gateway(
 
             tokio::spawn(async move {
                 while let Ok(text) = receiver.recv().await {
+                    if text.contains("./") { continue };
                     let msg = Message::text(text);
                     if let Err(_) = sink.send(msg).await {
                         break;

@@ -21,10 +21,10 @@ pub enum ReturnCode {
 
 pub type Table = HashMap<Uuid, Arc<RwLock<User>>>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct User {
     #[serde(skip)]
-    pub sender: Option<Sender<String>>,
+    pub sender: Sender<String>,
     uuid: Uuid,
     login: String,
     display_name: String,
@@ -32,8 +32,18 @@ pub struct User {
 }
 
 impl User {
+    pub fn from_account(account: entities::accounts::Model, sender: Sender<String>) -> Self {
+        Self { 
+            sender,
+            uuid: account.uuid,
+            login: account.login,
+            display_name: account.display_name,
+            created_at: account.created_at.timestamp()
+        }
+    }
+
     pub fn set_sender(&mut self, sender: Sender<String>) {
-        self.sender = Some(sender);
+        self.sender = sender;
     }
 
     pub fn uuid(&self) -> &Uuid {
@@ -58,17 +68,6 @@ impl Eq for User { }
 impl PartialEq for User {
     fn eq(&self, other: &Self) -> bool {
         self.uuid == other.uuid
-    }
-}
-
-
-impl From<entities::accounts::Model> for User {
-    fn from(model: entities::accounts::Model) -> Self {
-        let uuid = model.uuid;
-        let login = model.login;
-        let display_name = model.display_name;
-        let created_at = model.created_at.timestamp();
-        Self { sender: None, uuid, login, display_name, created_at }
     }
 }
 
