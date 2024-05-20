@@ -29,7 +29,6 @@ pub struct User {
     login: String,
     display_name: String,
     created_at: i64,
-    #[serde(skip)]
     pub room: Option<String>,
 }
 
