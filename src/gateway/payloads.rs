@@ -69,36 +69,17 @@ impl Identify {
     }
 }
 
-#[derive(Debug)]
-pub struct Player(game::player::Player<http::rooms::player::Data>);
-impl ser::Serialize for Player {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: ser::Serializer {
-        let mut state = serializer.serialize_struct("player", 3)?;
-        state.serialize_field("data", &self.0.data)?;
-        state.serialize_field("is_ready", &self.0.is_ready)?;
-        state.serialize_field("points", &self.0.points)?;
-        state.end()
-    }
-}
-
-impl From<game::player::Player<http::rooms::player::Data>> for Player {
-    fn from(value: game::player::Player<http::rooms::player::Data>) -> Self {
-        Self { 0: value }
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub struct RoomPlayer {
     room_id: String,
-    player: Player,
+    player: game::player::Player,
 }
 
 impl RoomPlayer {
-    pub fn from_room(room: crate::Room, player_query: http::rooms::player::Data) -> Self {
+    pub fn from_room(room: crate::Room, player_id: Uuid) -> Self {
         Self {
             room_id: room.id().clone(),
-            player: Player::from(room.players().get::<http::rooms::player::Data>(&player_query).cloned().unwrap()),
+            player: room.players().get(&player_id).cloned().unwrap(),
         }
     }
 }

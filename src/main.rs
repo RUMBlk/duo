@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 
 use http::*;
 
-pub type Room = rooms::Room<http::rooms::player::Data, Uuid>;
+pub type Room = rooms::Room;
 pub type Rooms = HashSet::<Room>;
 
 #[handler]
@@ -52,6 +52,7 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/gateway", get(gateway::gateway))
             .at("/api/auth/register", head(auth::exists).post(auth::register))
             .at("/api/auth/login", post(auth::login))
+            .at("/api/users/:id", get(users::get))
             .at("/api/rooms", get(http::rooms::get_rooms_list).post(http::rooms::create))
             .at("/api/rooms/:id", patch(http::rooms::update))
             .at("/api/rooms/:id/join", post(http::rooms::join))

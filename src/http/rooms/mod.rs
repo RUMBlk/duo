@@ -1,5 +1,4 @@
 pub mod reimpl;
-pub mod player;
 
 use poem::{handler, http::StatusCode, web::{ self, Data, Json, Path }, Request, Response };
 use sea_orm::{ prelude::Uuid, DatabaseConnection };
@@ -66,7 +65,7 @@ pub async fn create(
     }
 
     let mut rooms = rooms_ptr.write().await;
-    let mut room = reimpl::Room::create(rooms_ptr.to_owned(), body.name.clone(), body.is_public, body.password.clone(), player.to_owned(), body.max_players)
+    let mut room = reimpl::Room::create(rooms_ptr.to_owned(), body.name.clone(), body.is_public, body.password.clone(), *player.uuid(), body.max_players, player.sender.clone())
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     while let Some(_) = rooms.get(&room.0) {
         room.0.regenerate_id()
@@ -113,7 +112,7 @@ pub async fn update(
     let mut rooms = rooms_ptr.write().await;
     let mut room = rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?;
 
-    if *room.owner() != Some(player_id) { return Err(StatusCode::FORBIDDEN) }
+    if *room.owner() != player_id { return Err(StatusCode::FORBIDDEN) }
 
     let mut room = reimpl::Room(room.clone());
     let result = room.update(body.name.clone(), body.is_public, body.password.clone(), body.owner, body.max_players);
@@ -157,7 +156,7 @@ pub async fn join(
 
     let mut rooms = rooms_ptr.write().await;
     let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
-    room.join(body.password.clone(), player.clone().into()).map_err(|_| StatusCode::FORBIDDEN)?;
+    room.join(body.password.clone(), *player.uuid(), player.sender.clone()).map_err(|_| StatusCode::FORBIDDEN)?;
     rooms.insert(room.0.clone());
     player.room = Some(room.0.id().clone());
     Ok(Json(room))
@@ -187,7 +186,35 @@ pub async fn leave(
 
     let mut rooms = rooms_ptr.write().await;
     let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
-    room.leave(player.clone().into()).map_err(|_| StatusCode::FORBIDDEN)?;
+    room.leave(player.uuid().clone()).map_err(|_| StatusCode::FORBIDDEN)?;
+    player.room = None;
+    Ok(StatusCode::OK)
+}
+
+#[handler]
+pub async fn ready(
+    Path(id): Path<String>,
+    req: &Request,
+    db: Data<&Arc<DatabaseConnection>>,
+    players_ptr: Data<&Arc<RwLock<gateway::sessions::Table>>>,
+    rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
+) -> Result<StatusCode, StatusCode> {
+    let auth = Uuid::parse_str(
+        req.header("authorization")
+        .ok_or(StatusCode::BAD_REQUEST)?
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let db = db.deref().as_ref();
+    let player_id = queries::sessions::get_account_uuid(auth).one(db).await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    let mut players = players_ptr.write().await;
+    let mut player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.write().await;
+
+    let mut rooms = rooms_ptr.write().await;
+    let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
+    room.player_switch_ready(player.uuid().clone()).map_err(|_| StatusCode::FORBIDDEN)?;
     player.room = None;
     Ok(StatusCode::OK)
 }

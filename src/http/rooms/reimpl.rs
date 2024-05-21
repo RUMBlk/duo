@@ -1,28 +1,29 @@
 
 use serde::{ ser::SerializeStruct, Serialize };
 use sea_orm::prelude::Uuid;
+use std::borrow::BorrowMut;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::sync::broadcast::Sender;
+use tokio::time::sleep;
 
 use crate::{game::rooms::*, gateway::payloads::RoomPlayerInfo};
-use crate::gateway::sessions::User;
 use crate::gateway::payloads::{ Payload, RoomPlayer };
-
-use super::player;
 
 #[derive(Debug, Clone)]
 pub struct Room(pub crate::Room);
 
 impl Room {
-    pub fn create<'a>(stored_in: Arc<RwLock<crate::Rooms>>, name: String, is_public: bool, password: Option<String>, owner: User, max_players: usize) -> Result<Self, Error<'a>> {
+    pub fn create<'a>(stored_in: Arc<RwLock<crate::Rooms>>, name: String, is_public: bool, password: Option<String>, owner: Uuid, max_players: usize, sender: Sender<String>) -> Result<Self, Error<'a>> {
         let mut room = Self(crate::Room::default());
         room.0.stored_in = Some(stored_in);
         room.0.set_name(name)?;
         room.0.is_public = is_public;
         room.0.set_password(password.clone())?;
         room.0.set_max_players(max_players)?;
-        room.0.join(password, owner.clone().into())?;
-        room.0.set_owner(owner.uuid().clone())?;
+        room.0.join(password, owner.clone(), sender)?;
+        room.0.set_owner(owner.clone())?;
         let thread_room = room.clone();
         tokio::spawn(async move {
             thread_room.clone().announce(Payload::RoomCreate(thread_room)).await;
@@ -46,10 +47,23 @@ impl Room {
         result
     }
 
+    pub async fn delete(&self) {
+        if let Some(ref rooms) = self.0.stored_in {
+            rooms.write().await.remove(&self.0);
+        }
+    }
+
     async fn announce(&mut self, payload: Payload ) {
-        for player in self.0.players().clone() {
-            if let Err(_) = player.data.sender().send(payload.to_json_string()) {
-                let _ = self.leave(player.data);
+        for player in self.clone().0.players() {
+            if let Err(_) = player.sender.send(payload.to_json_string()) {
+                sleep(Duration::from_secs(60)).await;
+                if player.sender.receiver_count() == 0 {
+                    if player.id == *self.0.owner() { 
+                        self.delete().await;
+                        continue;
+                    }
+                    let _ = self.leave(player.id);
+                }
             }
         }
     }
@@ -61,7 +75,7 @@ impl From<crate::Room> for Room {
     }
 }
 
-impl<'a, 'b> Interaction<'a, 'b, player::Data, Uuid> for Room {
+impl<'a, 'b> Interaction<'a, 'b> for Room {
     fn set_name(&mut self, name: String) -> Result<(), Error<'b>> {
         self.0.set_name(name)?;
         let room = self.clone();
@@ -80,8 +94,8 @@ impl<'a, 'b> Interaction<'a, 'b, player::Data, Uuid> for Room {
         Ok(())
     }
 
-    fn set_owner(&mut self, ownership: Uuid) -> Result<(), Error<'b>> {
-        self.0.set_owner(ownership)?;
+    fn set_owner(&mut self, owner: Uuid) -> Result<(), Error<'b>> {
+        self.0.set_owner(owner)?;
         let room = self.clone();
         tokio::spawn(async move {
             room.clone().announce(Payload::RoomUpdate(room)).await;
@@ -98,27 +112,39 @@ impl<'a, 'b> Interaction<'a, 'b, player::Data, Uuid> for Room {
         Ok(())
     }
 
-    fn join(&mut self, password: Option<String>, player: player::Data) -> Result<(), Error<'b>> {
-        self.0.join(password, player.clone())?;
+    fn join(&mut self, password: Option<String>, player_id: Uuid, sender: Sender<String>) -> Result<(), Error<'b>> {
+        self.0.join(password, player_id.clone(), sender)?;
         let room = self.clone();
         tokio::spawn(async move {
-            let _ = player.sender().send(Payload::RoomCreate(room.clone()).to_json_string());
-            room.clone().announce(Payload::RoomPlayerNew(RoomPlayer::from_room(room.0, player))).await;
+            let _ = room.0.players().get(&player_id).unwrap().sender.send(Payload::RoomCreate(room.clone()).to_json_string());
+            room.clone().announce(Payload::RoomPlayerNew(RoomPlayer::from_room(room.0, player_id))).await;
         });
         Ok(())
     }
 
-    fn leave(&mut self, player: player::Data) -> Result<(), Error<'b>> {
-        if *self.0.owner() == Some(*player.id()) {
-            return Err(Error::Forbidden("Owners can't leave their room, consider to transfer ownership or delete the room"))
+    fn leave(&mut self, player_id: Uuid) -> Result<(), Error<'b>> {
+        let mut delete_room = false;
+        if *self.0.owner() == player_id {
+            if let Some(player) = self.0.players().iter().next() {
+                let _ = self.0.set_owner(player.id);
+            } else {
+                delete_room = true;
+            }
         }
-        self.0.players_mut().remove(&player::Data::from(player.clone()));
+        self.0.players_mut().remove(&player_id);
         let room = self.clone();
         tokio::spawn(async move {
-            room.clone().announce(Payload::RoomPlayerLeft(RoomPlayerInfo::new(room.0.id().to_owned(), player.id().to_owned()))).await;
-            if let Some(ref rooms) = room.0.stored_in {
-                rooms.write().await.remove(&room.0);
-            }
+            room.clone().announce(Payload::RoomPlayerLeft(RoomPlayerInfo::new(room.0.id().to_owned(), player_id))).await;
+            if delete_room { let _ = room.delete(); }
+        });
+        Ok(())
+    }
+
+    fn player_switch_ready(&'a mut self, player_id: Uuid) -> Result<(), Error<'b>> {
+        self.0.player_switch_ready(player_id)?;
+        let room = self.clone();
+        tokio::spawn(async move {
+            room.clone().announce(Payload::RoomPlayerUpdate(RoomPlayer::from_room(room.0, player_id))).await;
         });
         Ok(())
     }
