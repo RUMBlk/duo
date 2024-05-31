@@ -57,7 +57,7 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/rooms/:id", patch(http::rooms::update))
             .at("/api/rooms/:id/join", post(http::rooms::join))
             .at("/api/rooms/:id/leave", post(http::rooms::leave))
-            .with(Cors::new())
+            .with(Cors::new().allow_origin_regex("*"))
             .with(AddData::new(Arc::new(db)))
             .with(AddData::new(Arc::new(RwLock::new(gateway::sessions::Table::new()))))
             .with(AddData::new(Arc::new(RwLock::new(Rooms::new()))));
