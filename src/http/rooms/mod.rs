@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{ RwLock, RwLockWriteGuard};
 use std::{ ops::Deref, sync::Arc };
 use crate::{game::rooms::Partial, Rooms};
-use crate::game::rooms::Interaction;
+use crate::game::{self, rooms::Interaction};
 use crate::database::queries;
 use crate::gateway::sessions::User;
 
@@ -168,7 +168,12 @@ pub async fn leave(
     let (mut players, mut rooms, mut player) =
         prelude(db, req.header("authorization"), players_ptr.deref(), rooms_ptr.deref()).await?;
     let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
-    room.leave(player.uuid().clone()).map_err(|_| StatusCode::FORBIDDEN)?;
+    let leave = room.leave(player.uuid().clone());
+    if let Err(game::rooms::Error::CantAssignNewOwner) = leave {
+        rooms.remove(&room.0);
+    } else {
+        leave.map_err(|_| StatusCode::FORBIDDEN)?
+    }
     player.room = None;
     players.replace(player);
     Ok(StatusCode::OK)
