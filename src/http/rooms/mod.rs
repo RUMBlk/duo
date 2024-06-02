@@ -142,12 +142,14 @@ pub async fn join(
     let db = db.deref().as_ref();
     let (mut players, mut rooms, mut player) =
         prelude(db, req.header("authorization"), players_ptr.deref(), rooms_ptr.deref()).await?;
-    if let Some(room) = &player.room {
-        if id != *room {
+        let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
+    if let Some(room_id) = &player.room {
+        if id != *room_id {
             return Err(StatusCode::FORBIDDEN);
+        } else {
+            return Ok(Json(room))
         }
     }
-    let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
     room.join(body.password.clone(), *player.uuid(), player.sender.clone()).map_err(|_| StatusCode::FORBIDDEN)?;
     rooms.replace(room.0.clone());
     player.room = Some(room.0.id().clone());
@@ -174,6 +176,7 @@ pub async fn leave(
     } else {
         leave.map_err(|_| StatusCode::FORBIDDEN)?
     }
+    rooms.replace(room.0);
     player.room = None;
     players.replace(player);
     Ok(StatusCode::OK)
@@ -192,5 +195,6 @@ pub async fn ready(
         prelude(db, req.header("authorization"), players_ptr.deref(), rooms_ptr.deref()).await?;
     let mut room = reimpl::Room(rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone());
     room.player_switch_ready(player.uuid().clone()).map_err(|_| StatusCode::FORBIDDEN)?;
+    rooms.replace(room.0);
     Ok(StatusCode::OK)
 }
