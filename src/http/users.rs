@@ -1,13 +1,12 @@
 use poem::{
     handler, http::StatusCode, web::{
         Data, Json, Path
-    }, Response,
+    },
 };
-use sea_orm::{prelude::Uuid, DatabaseConnection, DbErr, TryInsertResult};
+use sea_orm::DatabaseConnection;
 use std::{ops::Deref, sync::Arc};
 use crate::database::{self, queries};
-use sha256;
-use serde::{Deserialize, Serialize, ser::SerializeStruct};
+use serde::{Serialize, ser::SerializeStruct};
 
 struct User(pub database::entities::accounts::Model);
 
@@ -19,6 +18,7 @@ impl Serialize for User {
         state.serialize_field("uuid", &self.0.uuid)?;
         state.serialize_field("login", &self.0.login)?;
         state.serialize_field("display_name", &self.0.display_name)?;
+        state.serialize_field("created_at", &self.0.created_at)?;
         state.end()
     }
 }

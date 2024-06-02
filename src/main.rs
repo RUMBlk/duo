@@ -7,7 +7,6 @@ use game::rooms;
 use poem::{
     get, handler, head, middleware::{ AddData, Cors }, patch, post, EndpointExt, Route
 };
-use sea_orm::prelude::Uuid;
 use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
 use std::{collections::HashSet, sync::Arc};
@@ -15,8 +14,8 @@ use tokio::sync::RwLock;
 
 use http::*;
 
-pub type Room = rooms::Room;
-pub type Rooms = HashSet::<Room>;
+pub type Players = HashSet::<gateway::sessions::User>;
+pub type Rooms = HashSet::<rooms::Room>;
 
 #[handler]
 fn hello_world() -> &'static str {
@@ -56,10 +55,11 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/rooms", get(http::rooms::get_rooms_list).post(http::rooms::create))
             .at("/api/rooms/:id", patch(http::rooms::update))
             .at("/api/rooms/:id/join", post(http::rooms::join))
+            .at("/api/rooms/:id/ready", post(http::rooms::ready))
             .at("/api/rooms/:id/leave", post(http::rooms::leave))
             .with(Cors::new().allow_origin_regex("*"))
             .with(AddData::new(Arc::new(db)))
-            .with(AddData::new(Arc::new(RwLock::new(gateway::sessions::Table::new()))))
+            .with(AddData::new(Arc::new(RwLock::new(Players::new()))))
             .with(AddData::new(Arc::new(RwLock::new(Rooms::new()))));
             Ok(app.into())
         }

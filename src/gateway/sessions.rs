@@ -1,8 +1,8 @@
 use serde::{ Serialize, Deserialize };
 use sea_orm::prelude::Uuid;
+use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
-use std::{ sync::Arc, collections::HashMap };
-use tokio::sync::{ RwLock, broadcast::Sender };
+use tokio::sync::broadcast::Sender;
 
 use crate::database::entities;
 
@@ -18,8 +18,6 @@ pub enum ReturnCode {
     MaxPlayersNotSet,
     MaxPlayersCantBeLowerThan(usize),
 }
-
-pub type Table = HashMap<Uuid, Arc<RwLock<User>>>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct User {
@@ -76,5 +74,11 @@ impl PartialEq for User {
 impl Hash for User {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.uuid.hash(state);
+    }
+}
+
+impl Borrow<Uuid> for User {
+    fn borrow(&self) -> &Uuid {
+        &self.uuid
     }
 }

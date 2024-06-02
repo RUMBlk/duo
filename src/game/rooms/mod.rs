@@ -1,23 +1,23 @@
+pub mod player;
+
 use std::{borrow::Borrow, collections::HashSet, hash::Hash};
 use sea_orm::prelude::Uuid;
-use tokio::sync::RwLock;
 use tokio::sync::broadcast::Sender;
 use random_string;
-use serde::Serialize;
-use std::sync::Arc;
-use super::player::{self, Player};
+use serde::{ser::SerializeStruct, Serialize};
+use player::Player;
 
 #[derive(Debug, Serialize)]
 pub enum Error<'a> {
     PlayerNotInRoom,
     BadArgument(&'a str),
     Forbidden(&'a str),
+    CantAssignNewOwner,
     Full,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Room {
-    pub stored_in: Option<Arc<RwLock<HashSet<Room>>>>,
     id: String,
     name: String,
     pub is_public: bool,
@@ -32,7 +32,6 @@ impl Default for Room
  {
     fn default() -> Self {
         Self {
-            stored_in: None,
             id: Self::generate_id(),
             name: String::from("Room"),
             is_public: false,
@@ -141,6 +140,9 @@ impl<'a, 'b> Interaction<'a, 'b> for Room {
         if !self.players_mut().remove(&player_id) {
             return Err(Error::PlayerNotInRoom);
         };
+        if self.owner == player_id {
+            self.owner = self.players.iter().next().ok_or(Error::CantAssignNewOwner)?.id;
+        }
         Ok(())
     }
 
@@ -176,5 +178,22 @@ impl Hash for Room
  {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
+    }
+}
+
+pub struct Partial(pub Room);
+impl Serialize for Partial {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        let mut state = serializer.serialize_struct("room", 6)?;
+        state.serialize_field("id", self.0.id())?;
+        state.serialize_field("name", self.0.name())?;
+        state.serialize_field("is_public", &self.0.is_public)?;
+        state.serialize_field("password", &self.0.password().is_some() )?;
+        state.serialize_field("owner", self.0.owner())?;
+        state.serialize_field("max_players", self.0.max_players())?;
+        state.serialize_field("players", &self.0.players().len())?;
+        state.end()
     }
 }

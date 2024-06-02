@@ -1,8 +1,7 @@
 use sea_orm::prelude::Uuid;
-use serde::{ Serialize, Deserialize, ser::{ self, SerializeStruct } };
+use serde::{ Serialize, Deserialize };
 use serde_json;
-use crate::{game, http};
-use crate::http::rooms::reimpl::*;
+use crate::game;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Payload {
@@ -18,9 +17,9 @@ pub enum Payload {
     #[serde(skip_deserializing)]
     RoomPlayerLeft(RoomPlayerInfo),
     #[serde(skip_deserializing)]
-    RoomCreate(Room),
+    RoomCreate(game::rooms::Room),
     #[serde(skip_deserializing)]
-    RoomUpdate(Room),
+    RoomUpdate(game::rooms::Room),
     //From Server/Client
     Identify(Identify),
     #[serde(skip_deserializing)]
@@ -72,11 +71,11 @@ impl Identify {
 #[derive(Debug, Serialize)]
 pub struct RoomPlayer {
     room_id: String,
-    player: game::player::Player,
+    player: game::rooms::player::Player,
 }
 
 impl RoomPlayer {
-    pub fn from_room(room: crate::Room, player_id: Uuid) -> Self {
+    pub fn from_room(room: game::rooms::Room, player_id: Uuid) -> Self {
         Self {
             room_id: room.id().clone(),
             player: room.players().get(&player_id).cloned().unwrap(),

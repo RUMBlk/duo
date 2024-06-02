@@ -13,6 +13,7 @@ use tokio::sync::{ broadcast, RwLock };
 use tokio::time::sleep;
 use futures_util::StreamExt;
 use payloads::*;
+use crate::{game::rooms::{self, Interaction}, http::rooms::reimpl};
 
 fn unwrap_event(event: Result<Payload, Error>) -> Payload {
     match event {
@@ -25,10 +26,12 @@ fn unwrap_event(event: Result<Payload, Error>) -> Payload {
 pub async fn gateway(
     ws: WebSocket,
     db: Data<&Arc<DatabaseConnection>>,
-    players: Data<&Arc<RwLock<sessions::Table>>>,
+    players_ptr: Data<&Arc<RwLock<crate::Players>>>,
+    rooms_ptr: Data<&Arc<RwLock<crate::Rooms>>>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let db = db.to_owned(); 
-    let players = players.to_owned();
+    let players = players_ptr.to_owned();
+    let rooms = rooms_ptr.to_owned();
     let (sender, mut receiver) = broadcast::channel::<String>(12);
     //let mut receivers = sender.subscribe();
     Ok(
@@ -49,13 +52,7 @@ pub async fn gateway(
                             if let Ok(request) = request {
                                 match request {
                                     Payload::Identify(payload) =>
-                                        events::identify(db, payload, &players, sender.clone(), &mut user_id).await,
-                                    /*Payload::RoomCreate(payload) => events::room_create(payload, &identity, &rooms, sender.clone()).await,
-                                    Payload::RoomUpdate(payload) => events::room_update(payload, &identity, &rooms).await,
-                                    Payload::RoomJoin(payload) => 
-                                        events::room_join(payload, &identity, &rooms, sender.clone()).await,
-                                    Payload::RoomLeave(room_id) => 
-                                        events::room_leave(room_id, &identity, &rooms).await,*/
+                                        events::identify(db, payload, &players, &rooms.clone(), sender.clone(), &mut user_id).await,
                                     _ => {         
                                         Ok(Payload::Error( Error::Declined ))
                                     },
@@ -63,18 +60,25 @@ pub async fn gateway(
                             } else { Err(Error::BadRequest(request.unwrap_err().to_string())) }
                         );
                         let _ = sender.send(payload.to_json_string());
-                        //let _ = sink.send(Message::Text(serde_json::to_string(&payload).unwrap_or_default())).await;
                     }
                 }
                 if let Some(user_id) = user_id {
-                    let _ = sleep(Duration::from_secs(60));
+                    let _ = sleep(Duration::from_secs(60)).await;
                     let mut players = players.write().await;
-                    let mut disconnect = false;
-                    if let Some(player) = players.get(&user_id) {
-                        let player = player.read().await;
-                        disconnect = sender.same_channel(&player.sender);
+                    let disconnect = if let Some(player) = players.get(&user_id) {
+                        if sender.same_channel(&player.sender) { Some(player.clone()) } else { None }
+                    } else { None };
+                    if let Some(player) = disconnect { 
+                        let mut rooms = rooms.write().await;
+                        if let Some(mut room) = player.room.and_then(|room_id| rooms.get(&room_id).cloned()) {
+                            let mut room = reimpl::Room(room);
+                            match room.leave(user_id) {
+                                Err(rooms::Error::CantAssignNewOwner) => { rooms.remove(&room.0); },
+                                Ok(_) | Err(_) => { rooms.replace(room.0); },
+                            }
+                        }
+                        players.remove(&user_id);
                     }
-                    if disconnect { players.remove(&user_id); }
                 }
             });
 
