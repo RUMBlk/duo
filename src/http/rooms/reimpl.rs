@@ -85,6 +85,7 @@ impl<'a, 'b> Interaction<'a, 'b> for Room {
     fn join(&mut self, password: Option<String>, player_id: Uuid, sender: Sender<String>) -> Result<(), Error<'b>> {
         self.0.join(password, player_id.clone(), sender)?;
         let room = self.clone();
+        self.announce(Payload::RoomCreate(room.0.clone()));
         self.announce(Payload::RoomPlayerNew(RoomPlayer::from_room(room.0, player_id)));
         Ok(())
     }
