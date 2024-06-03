@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+futures = "0.3.30"
 futures-util = "0.3.30"
 json-patch = "2.0.0"
 poem = { version = "3.0.0", features = ["session", "websocket"] }
@@ -14,7 +15,6 @@ sea-orm = { version = "0.12.15", features = ["sqlx-postgres", "sqlx-sqlite", "ru
 serde = "1.0.200"
 serde-partial = "0.3.1"
 serde_json = "1.0.116"
-serde_with = "3.8.1"
 sha256 = "1.5.0"
 shuttle-poem = "0.44.0"
 shuttle-runtime = "0.44.0"

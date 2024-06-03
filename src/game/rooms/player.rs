@@ -2,6 +2,8 @@ use std::{borrow::Borrow, hash::Hash};
 use serde::Serialize;
 use sea_orm::prelude::Uuid;
 use tokio::sync::broadcast::Sender;
+use crate::gateway::events::SharedTableEvents;
+use crate::gateway::payloads::Payload;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Player {
@@ -15,6 +17,23 @@ pub struct Player {
 impl Player {
     pub fn new(id: Uuid, sender: Sender<String>) -> Self {
         Self { id, sender, is_ready: false, points: 0 }
+    }
+}
+
+impl SharedTableEvents for Player {
+    fn insert(&self, other: Self) {
+        let content = Payload::RoomPlayerNew(other).to_json_string();
+        let _ = self.sender.send(content);
+    }
+
+    fn update(&self, other: Self) {
+        let content = Payload::RoomPlayerUpdate(other).to_json_string();
+        let _ = self.sender.send(content);
+    }
+
+    fn delete(&self, other: Self) {
+        let content = Payload::RoomPlayerLeft(other.id).to_json_string();
+        let _ = self.sender.send(content);
     }
 }
 

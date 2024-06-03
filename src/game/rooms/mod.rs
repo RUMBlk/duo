@@ -1,11 +1,14 @@
 pub mod player;
 
-use std::{borrow::Borrow, collections::HashSet, hash::Hash};
+use std::{borrow::Borrow, hash::Hash};
 use sea_orm::prelude::Uuid;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::{ RwLock, broadcast::Sender };
+use std::sync::Arc;
 use random_string;
 use serde::{ser::SerializeStruct, Serialize};
 use player::Player;
+use crate::{gateway::{ events::TableEvents, payloads::Payload }, runtime_storage::{ DataTable, SharedTable }};
+use futures::executor;
 
 #[derive(Debug, Serialize)]
 pub enum Error<'a> {
@@ -16,7 +19,7 @@ pub enum Error<'a> {
     Full,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Room {
     id: String,
     name: String,
@@ -24,7 +27,7 @@ pub struct Room {
     password: Option<String>,
     owner: Uuid,
     max_players: usize,
-    players: HashSet<Player>,
+    players: Arc<RwLock<DataTable<Player>>>,
     //pub game: Option<to implement>,
 }
 
@@ -38,13 +41,49 @@ impl Default for Room
             password: None,
             owner: Uuid::default(),
             max_players: 2,
-            players: HashSet::new(),
+            players: Arc::new(RwLock::new(DataTable::new())),
         }
     }
 }
 
-impl Room
- {
+impl Serialize for Room {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        let mut state = serializer.serialize_struct("room", 6)?;
+        state.serialize_field("id", self.id())?;
+        state.serialize_field("name", self.name())?;
+        state.serialize_field("is_public", &self.is_public)?;
+        state.serialize_field("password", self.password() )?;
+        state.serialize_field("owner", self.owner())?;
+        state.serialize_field("max_players", self.max_players())?;
+        state.serialize_field("players", &*executor::block_on(self.players.read()))?;
+        state.end()
+    }
+}
+
+impl<'a, 'b> Room
+{
+    pub async fn create(name: String, is_public: bool, password: Option<String>, owner: Uuid, max_players: usize, sender: Sender<String>) -> Result<Self, Error<'b>> {
+        let mut room = Self::default();
+        room.set_name(name)?;
+        room.is_public = is_public;
+        room.set_password(password.clone())?;
+        room.set_max_players(max_players)?;
+        room.join(password, owner.clone(), sender).await?;
+        room.set_owner(owner.clone())?;
+        Ok(room)
+    }
+
+    pub fn announce(&self, content: String ) {
+        let room = self.clone();
+        tokio::spawn(async move {
+            for player in &**room.players().read().await {
+                let _ = player.sender.send(content.clone());
+            }
+        });
+    }
+
     pub fn generate_id() -> String {
         random_string::generate(6, "0123456789")
     }
@@ -73,33 +112,17 @@ impl Room
         &self.max_players
     }
 
-    pub fn players(&self) -> &HashSet<Player> {
+    pub fn players(&self) -> &Arc<RwLock<DataTable<Player>>> {
         &self.players
     }
 
-    pub fn players_mut(&mut self) -> &mut HashSet<Player> {
-        &mut self.players
-    }
-}
-
-pub trait Interaction<'a, 'b> {
-    fn set_name(&'a mut self, name: String) -> Result<(), Error<'b>>;
-    fn set_password(&'a mut self, password: Option<String>) -> Result<(), Error<'b>>;
-    fn set_owner(&'a mut self, owner: Uuid) -> Result<(), Error<'b>>;
-    fn set_max_players(&'a mut self, max_players: usize) -> Result<(), Error<'b>>;
-    fn join(&'a mut self, password: Option<String>, player_id: Uuid, sender: Sender<String>) -> Result<(), Error<'b>>;
-    fn leave(&'a mut self, player_id: Uuid) -> Result<(), Error<'b>>;
-    fn player_switch_ready(&'a mut self, player_id: Uuid) -> Result<(), Error<'b>>;
-}
-
-impl<'a, 'b> Interaction<'a, 'b> for Room {
-    fn set_name(&mut self, name: String) -> Result<(), Error<'b>> {
+    pub fn set_name(&mut self, name: String) -> Result<(), Error<'b>> {
         if !name.is_empty() { self.name = name; }
         else { return Err(Error::BadArgument("name can't be an empty string")) }
         Ok(())
     }
 
-    fn set_password(&mut self, password: Option<String>) -> Result<(), Error<'b>> {
+    pub fn set_password(&mut self, password: Option<String>) -> Result<(), Error<'b>> {
         if let Some(ref pass) = password {
             if pass.len() < 32 { 
                 self.password = if pass.is_empty() { None } else { password }
@@ -109,75 +132,55 @@ impl<'a, 'b> Interaction<'a, 'b> for Room {
         Ok(())
     }
 
-    fn set_owner(&mut self, owner: Uuid) -> Result<(), Error<'b>> {
+    pub fn set_owner(&mut self, owner: Uuid) -> Result<(), Error<'b>> {
         self.owner = owner;
         Ok(())
     }
 
-    fn set_max_players(&mut self, max_players: usize) -> Result<(), Error<'b>> {
+    pub fn set_max_players(&mut self, max_players: usize) -> Result<(), Error<'b>> {
         if max_players < 2 { return Err( Error::BadArgument("max_players can't be lower than 2") ) }
         else { self.max_players = max_players }
         Ok(())
     }
 
-    fn join(&mut self, password: Option<String>, player_id: Uuid, sender: Sender<String>) -> Result<(), Error<'b>> {
+    pub async fn join(&'a self, password: Option<String>, player_id: Uuid, sender: Sender<String>) -> Result<(), Error<'b>> {
+        let mut players = self.players.write().await;
         if let Some(pass) = &self.password {
             if Some(pass) != password.as_ref() {
                 return Err(Error::Forbidden("Wrong password"));
             }
         }
-        if self.players.len() >= self.max_players {
+        if players.len() >= self.max_players && !players.contains(&player_id) {
             return Err(Error::Full)
         }
         
 
         //if self.players.contains(&player) { return Err(Error::PlayerAlreadyInRoom) }
-        self.players.insert(player::Player::new(player_id, sender));
+        players.shared_insert(player::Player::new(player_id, sender));
         Ok(())
     }
 
-    fn leave(&mut self, player_id: Uuid) -> Result<(), Error<'b>> {
-        if !self.players_mut().remove(&player_id) {
+    pub async fn leave(&'a mut self, player_id: Uuid) -> Result<bool, Error<'b>> {
+        let mut players = self.players.write().await;
+        if !players.shared_remove(&player_id) {
             return Err(Error::PlayerNotInRoom);
         };
-        if self.owner == player_id {
-            self.owner = self.players.iter().next().ok_or(Error::CantAssignNewOwner)?.id;
+        let changed = self.owner == player_id;
+        if changed {
+            self.owner = players.iter().next().ok_or(Error::CantAssignNewOwner)?.id;
         }
+        Ok(changed)
+    }
+
+    pub async fn player_switch_ready(&'a self, player_id: Uuid) -> Result<(), Error<'b>> {
+        let mut players = self.players.write().await;
+        players.shared_update(&player_id, |player| {
+            player.is_ready = !player.is_ready;
+            eprintln!("{:?}", player);
+            Ok::<(), ()>(())
+        }).unwrap_or(None).ok_or(Error::PlayerNotInRoom)?;
+        eprintln!("{:?}", players.get(&player_id));
         Ok(())
-    }
-
-    fn player_switch_ready(&'a mut self, player_id: Uuid) -> Result<(), Error<'b>> {
-        let mut player = self.players.get(&player_id).ok_or(Error::PlayerNotInRoom)?.clone();
-        player.is_ready = !player.is_ready;
-        self.players.insert(player);
-        Ok(())
-    }
-}
-
-impl Borrow<String> for Room {
-    fn borrow(&self) -> &String {
-        &self.id
-    }
-}
-impl Borrow<Uuid> for Room {
-    fn borrow(&self) -> &Uuid {
-        &self.owner
-    }
-}
-
-impl Eq for Room { }
-
-impl PartialEq for Room
- {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Hash for Room
- {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
     }
 }
 
@@ -193,7 +196,51 @@ impl Serialize for Partial {
         state.serialize_field("password", &self.0.password().is_some() )?;
         state.serialize_field("owner", self.0.owner())?;
         state.serialize_field("max_players", self.0.max_players())?;
-        state.serialize_field("players", &self.0.players().len())?;
+        state.serialize_field("players", &executor::block_on(self.0.players.read()).len())?;
         state.end()
+    }
+}
+
+impl TableEvents for Room {
+    fn insert(&self) {
+        let content = Payload::RoomCreate(self.clone()).to_json_string();
+        self.announce(content)
+    }
+
+    fn update(&self) {
+        let content = Payload::RoomUpdate(self.clone()).to_json_string();
+        self.announce(content)
+    }
+
+    fn delete(&self) {
+        let content = Payload::RoomDelete(self.id().clone()).to_json_string();
+        self.announce(content)
+    }
+}
+
+impl Borrow<String> for Room {
+    fn borrow(&self) -> &String {
+        &self.id()
+    }
+}
+impl Borrow<Uuid> for Room {
+    fn borrow(&self) -> &Uuid {
+        &self.owner()
+    }
+}
+
+impl Eq for Room { }
+
+impl PartialEq for Room
+ {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl Hash for Room
+ {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
     }
 }

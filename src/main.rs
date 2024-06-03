@@ -2,8 +2,8 @@ mod database;
 mod gateway;
 mod http;
 mod game;
+mod runtime_storage;
 
-use game::rooms;
 use poem::{
     get, handler, head, middleware::{ AddData, Cors }, patch, post, EndpointExt, Route
 };
@@ -11,11 +11,10 @@ use shuttle_poem::ShuttlePoem;
 use shuttle_runtime::SecretStore;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
-
 use http::*;
 
 pub type Players = HashSet::<gateway::sessions::User>;
-pub type Rooms = HashSet::<rooms::Room>;
+pub type Rooms = runtime_storage::DataTable::<game::rooms::Room>;
 
 #[handler]
 fn hello_world() -> &'static str {

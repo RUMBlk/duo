@@ -11,15 +11,17 @@ pub enum Payload {
     #[serde(skip_deserializing)]
     Hello(Hello),
     #[serde(skip_deserializing)]
-    RoomPlayerNew(RoomPlayer),
+    RoomPlayerNew(game::rooms::player::Player),
     #[serde(skip_deserializing)]
-    RoomPlayerUpdate(RoomPlayer),
+    RoomPlayerUpdate(game::rooms::player::Player),
     #[serde(skip_deserializing)]
-    RoomPlayerLeft(RoomPlayerInfo),
+    RoomPlayerLeft(Uuid),
     #[serde(skip_deserializing)]
     RoomCreate(game::rooms::Room),
     #[serde(skip_deserializing)]
     RoomUpdate(game::rooms::Room),
+    #[serde(skip_deserializing)]
+    RoomDelete(String),
     //From Server/Client
     Identify(Identify),
     #[serde(skip_deserializing)]
@@ -65,35 +67,5 @@ pub struct Identify {
 impl Identify {
     pub fn token(&self) -> String {
         self.token.clone()
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct RoomPlayer {
-    room_id: String,
-    player: game::rooms::player::Player,
-}
-
-impl RoomPlayer {
-    pub fn from_room(room: game::rooms::Room, player_id: Uuid) -> Self {
-        Self {
-            room_id: room.id().clone(),
-            player: room.players().get(&player_id).cloned().unwrap(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct RoomPlayerInfo {
-    room_id: String,
-    player_id: Uuid,
-}
-
-impl RoomPlayerInfo {
-    pub fn new(room_id: String, player_id: Uuid) -> Self {
-        Self {
-            room_id,
-            player_id,
-        }
     }
 }

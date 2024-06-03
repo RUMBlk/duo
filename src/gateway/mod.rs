@@ -13,7 +13,8 @@ use tokio::sync::{ broadcast, RwLock };
 use tokio::time::sleep;
 use futures_util::StreamExt;
 use payloads::*;
-use crate::{game::rooms::{self, Interaction}, http::rooms::reimpl};
+use crate::game::rooms;
+use crate::runtime_storage::Table;
 
 fn unwrap_event(event: Result<Payload, Error>) -> Payload {
     match event {
@@ -71,10 +72,9 @@ pub async fn gateway(
                     if let Some(player) = disconnect { 
                         let mut rooms = rooms.write().await;
                         if let Some(mut room) = player.room.and_then(|room_id| rooms.get(&room_id).cloned()) {
-                            let mut room = reimpl::Room(room);
-                            match room.leave(user_id) {
-                                Err(rooms::Error::CantAssignNewOwner) => { rooms.remove(&room.0); },
-                                Ok(_) | Err(_) => { rooms.replace(room.0); },
+                            match room.leave(user_id).await {
+                                Err(rooms::Error::CantAssignNewOwner) => { rooms.remove(&room); },
+                                Ok(_) | Err(_) => { rooms.replace(room); },
                             }
                         }
                         players.remove(&user_id);
