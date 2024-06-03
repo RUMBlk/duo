@@ -24,13 +24,15 @@ pub async fn identify(
     let mut players = players_ptr.write().await;
     let player = if let Some(player) = players.get(&uuid).cloned().as_mut() {
         player.set_sender(sender.clone());
+        eprintln!("asd");
         let rooms = rooms_ptr.read().await;
+        eprintln!("asd2");
         if let Some(room) = player.room.as_ref().and_then(|room_id| rooms.get(room_id).cloned()) {
             let _ = room.players().write().await.shared_update(&uuid, |player| {
-                player.sender = sender;
-                let _ = player.sender.send(Payload::RoomCreate(room.clone().into()).to_json_string());
+                player.sender = sender.clone();
                 Ok::<(), ()>(())
             });
+            let _ = sender.send(Payload::RoomCreate(room.clone()).to_json_string());
         }
         drop(rooms);
         player.to_owned()
