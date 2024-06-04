@@ -1,6 +1,6 @@
 pub mod player;
 
-use std::{borrow::Borrow, hash::Hash};
+use std::{borrow::Borrow, hash::Hash, ops::Deref};
 use sea_orm::prelude::Uuid;
 use tokio::sync::{ RwLock, broadcast::Sender };
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use serde::{ser::SerializeStruct, Serialize};
 use player::Player;
 use crate::{gateway::{ events::TableEvents, payloads::Payload }, runtime_storage::{ DataTable, SharedTable }};
 use futures::executor;
+use super::gameplay::Game;
 
 #[derive(Debug, Serialize)]
 pub enum Error<'a> {
@@ -16,6 +17,7 @@ pub enum Error<'a> {
     BadArgument(&'a str),
     Forbidden(&'a str),
     CantAssignNewOwner,
+    GameAlreadyStarted,
     Full,
 }
 
@@ -28,7 +30,7 @@ pub struct Room {
     owner: Uuid,
     max_players: usize,
     players: Arc<RwLock<DataTable<Player>>>,
-    //pub game: Option<to implement>,
+    pub game: Option<Arc<RwLock<Game>>>,
 }
 
 impl Default for Room
@@ -42,23 +44,8 @@ impl Default for Room
             owner: Uuid::default(),
             max_players: 2,
             players: Arc::new(RwLock::new(DataTable::new())),
+            game: None,
         }
-    }
-}
-
-impl Serialize for Room {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
-        let mut state = serializer.serialize_struct("room", 6)?;
-        state.serialize_field("id", self.id())?;
-        state.serialize_field("name", self.name())?;
-        state.serialize_field("is_public", &self.is_public)?;
-        state.serialize_field("password", self.password() )?;
-        state.serialize_field("owner", self.owner())?;
-        state.serialize_field("max_players", self.max_players())?;
-        state.serialize_field("players", &*executor::block_on(self.players.read()))?;
-        state.end()
     }
 }
 
@@ -114,6 +101,10 @@ impl<'a, 'b> Room
 
     pub fn players(&self) -> &Arc<RwLock<DataTable<Player>>> {
         &self.players
+    }
+
+    pub fn game(&self) -> &Option<Arc<RwLock<Game>>> {
+        &self.game
     }
 
     pub fn set_name(&mut self, name: String) -> Result<(), Error<'b>> {
@@ -182,14 +173,46 @@ impl<'a, 'b> Room
         eprintln!("{:?}", players.get(&player_id));
         Ok(())
     }
+
+    pub async fn start_game(&'a mut self) -> Result<(), Error<'b>> {
+        match self.game {
+            Some(_) => Err(Error::GameAlreadyStarted),
+            None => { 
+                let game_obj = Game::new(self.players.read().await.deref().deref().clone());
+                self.game = Some(Arc::new(RwLock::new(game_obj.clone())));
+                let game = self.game.as_ref().unwrap().read().await;
+                game.announce(Payload::GameStarted(game_obj).to_json_string());
+                game.announce_turn();
+                Ok(())
+            }
+        }
+    }
 }
+
+impl Serialize for Room {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        let mut state = serializer.serialize_struct("room", 8)?;
+        state.serialize_field("id", self.id())?;
+        state.serialize_field("name", self.name())?;
+        state.serialize_field("is_public", &self.is_public)?;
+        state.serialize_field("password", self.password() )?;
+        state.serialize_field("owner", self.owner())?;
+        state.serialize_field("max_players", self.max_players())?;
+        state.serialize_field("players", &*executor::block_on(self.players.read()))?;
+        state.serialize_field("game", &self.game().is_some())?;
+        state.end()
+    }
+}
+
 
 pub struct Partial(pub Room);
 impl Serialize for Partial {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer {
-        let mut state = serializer.serialize_struct("room", 6)?;
+        let mut state = serializer.serialize_struct("room", 8)?;
         state.serialize_field("id", self.0.id())?;
         state.serialize_field("name", self.0.name())?;
         state.serialize_field("is_public", &self.0.is_public)?;
@@ -197,6 +220,7 @@ impl Serialize for Partial {
         state.serialize_field("owner", self.0.owner())?;
         state.serialize_field("max_players", self.0.max_players())?;
         state.serialize_field("players", &executor::block_on(self.0.players.read()).len())?;
+        state.serialize_field("game", &self.0.game().is_some())?;
         state.end()
     }
 }

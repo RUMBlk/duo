@@ -4,7 +4,7 @@ use std::{borrow::Borrow, collections::HashSet, ops::Deref};
 use std::hash::Hash;
 
 #[derive(Debug, Serialize, Clone)]
-pub struct DataTable<T>(HashSet<T>);
+pub struct DataTable<T>(pub HashSet<T>);
 
 impl<T> DataTable<T>
 where T: Eq + PartialEq + Hash + Clone {

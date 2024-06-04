@@ -14,7 +14,7 @@ pub async fn start_session(db: &DatabaseConnection, login_: String, password: Op
     let account = queries::accounts::by_uuid_or_login(login_.to_lowercase())
         .one(db)
         .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     if account.password == password {
@@ -22,7 +22,7 @@ pub async fn start_session(db: &DatabaseConnection, login_: String, password: Op
         match queries::sessions::create(account.id, token)
             .exec(db)
             .await
-            .map_err(|_| StatusCode::BAD_GATEWAY)?
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         {
             TryInsertResult::Inserted(_) => Ok(token.to_string()),
             TryInsertResult::Conflicted => Err(StatusCode::CONFLICT),
@@ -50,7 +50,7 @@ pub async fn register(req: Json<Register>, db: Data<&Arc<DatabaseConnection>>) -
             |e| 
             match e {
                 DbErr::Query(_) => StatusCode::CONFLICT,
-                _ => StatusCode::BAD_GATEWAY,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
             })?
         {
         TryInsertResult::Inserted(_) => Ok(StatusCode::CREATED),
@@ -82,7 +82,7 @@ pub async fn exists(req: Json<Exists>, db: Data<&Arc<DatabaseConnection>>) -> Re
     queries::accounts::by_uuid_or_login(req.login.clone())
         .one(db)
         .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)
         .map(|_| StatusCode::OK)
 }

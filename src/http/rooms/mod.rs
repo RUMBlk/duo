@@ -1,11 +1,12 @@
+pub mod game;
+
 use poem::{handler, http::StatusCode, web::{ self, Data, Json, Path }, Request, Response };
 use sea_orm::{ prelude::Uuid, DatabaseConnection };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{ RwLock, RwLockWriteGuard};
 use std::{ ops::Deref, sync::Arc };
-use crate::game::rooms::Room;
+use crate::game::rooms::{self, Room};
 use crate::{game::rooms::Partial, Rooms};
-use crate::game;
 use crate::database::queries;
 use crate::gateway::sessions::User;
 use crate::runtime_storage::Table;
@@ -22,7 +23,7 @@ async fn prelude<'a>(
     ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let player_id = queries::sessions::get_account_uuid(auth).one(db).await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::FORBIDDEN)?;
 
     let players = players_ptr.write().await;
@@ -150,7 +151,7 @@ pub async fn join(
     db: Data<&Arc<DatabaseConnection>>,
     players_ptr: Data<&Arc<RwLock<crate::Players>>>,
     rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
-) -> Result<Json<game::rooms::Room>, StatusCode> {
+) -> Result<Json<Room>, StatusCode> {
     let db = db.deref().as_ref();
     let (mut players, rooms, mut player) =
         prelude(db, req.header("authorization"), players_ptr.deref(), rooms_ptr.deref()).await?;
@@ -182,7 +183,7 @@ pub async fn leave(
         prelude(db, req.header("authorization"), players_ptr.deref(), rooms_ptr.deref()).await?;
     let mut room = rooms.get::<String>(&id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let leave = room.leave(player.uuid().clone()).await;
-    if let Err(game::rooms::Error::CantAssignNewOwner) = leave {
+    if let Err(rooms::Error::CantAssignNewOwner) = leave {
         rooms.remove(&room.clone());
     } else if let Ok(true) = leave {
         rooms.replace(room);

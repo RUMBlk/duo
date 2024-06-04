@@ -29,7 +29,7 @@ pub async fn get(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> 
     let user = User(queries::accounts::by_uuid_or_login(id.clone())
         .one(db)
         .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?);
     Ok(Json(user))
 }

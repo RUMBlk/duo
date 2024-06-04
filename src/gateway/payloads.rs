@@ -22,6 +22,12 @@ pub enum Payload {
     RoomUpdate(game::rooms::Room),
     #[serde(skip_deserializing)]
     RoomDelete(String),
+    #[serde(skip_deserializing)]
+    GameStarted(game::gameplay::Game),
+    #[serde(skip_deserializing)]
+    GameNewTurn(game::gameplay::Game),
+    #[serde(skip_deserializing)]
+    GamePlayerCards(Vec<game::gameplay::card::Card>),
     //From Server/Client
     Identify(Identify),
     #[serde(skip_deserializing)]
