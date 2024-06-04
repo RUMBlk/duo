@@ -98,11 +98,14 @@ where T: Eq + PartialEq + Hash + SharedTableEvents + Clone {
 
     fn shared_replace(&mut self, value: T) -> Option<T> {
         let record = self.0.replace(value.clone());
-        if let Some(ref record) = record {             
-            for i in self.0.iter() {
-                i.update(record.clone())
-            } 
-        };
+        for i in self.0.iter() {
+            if record.is_some() {
+                i.update(value.clone())
+            }
+            else {
+                i.insert(value.clone())
+            }
+        } 
         record
     }
 
