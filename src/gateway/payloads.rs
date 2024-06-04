@@ -1,7 +1,7 @@
 use sea_orm::prelude::Uuid;
 use serde::{ Serialize, Deserialize };
 use serde_json;
-use crate::game;
+use crate::game::{self, gameplay::player::Losers};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Payload {
@@ -28,6 +28,8 @@ pub enum Payload {
     GameNewTurn(game::gameplay::Game),
     #[serde(skip_deserializing)]
     GamePlayerCards(Vec<game::gameplay::card::Card>),
+    #[serde(skip_deserializing)]
+    GameOver(Losers),
     //From Server/Client
     Identify(Identify),
     #[serde(skip_deserializing)]

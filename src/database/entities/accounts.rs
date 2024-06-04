@@ -12,10 +12,16 @@ pub struct Model {
     pub uuid: Uuid,
     #[sea_orm(column_type = "Text", unique)]
     pub login: String,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub password: Option<String>,
+    #[sea_orm(column_type = "Text")]
+    pub password: String,
     #[sea_orm(column_type = "Text")]
     pub display_name: String,
+    pub games_played: i64,
+    pub points: i64,
+    pub cards_had: i64,
+    pub wins: i32,
+    pub loses: i32,
+    pub max_points: i16,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

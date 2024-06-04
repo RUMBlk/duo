@@ -9,8 +9,8 @@ use crate::database::queries;
 use sha256;
 use serde::Deserialize;
 
-pub async fn start_session(db: &DatabaseConnection, login_: String, password: Option<String>) -> Result<Response, StatusCode> {
-    let password = password.and_then(|password| { Some(sha256::digest(password.clone()).to_ascii_uppercase()) });
+pub async fn start_session(db: &DatabaseConnection, login_: String, password: String) -> Result<Response, StatusCode> {
+    let password = sha256::digest(password.clone()).to_ascii_uppercase();
     let account = queries::accounts::by_uuid_or_login(login_.to_lowercase())
         .one(db)
         .await
@@ -35,14 +35,14 @@ pub async fn start_session(db: &DatabaseConnection, login_: String, password: Op
 #[derive(Debug, Deserialize)]
 struct Register {
     login: String,
-    password: Option<String>,
+    password: String,
     display_name: Option<String>,
 }
 #[handler]
 pub async fn register(req: Json<Register>, db: Data<&Arc<DatabaseConnection>>) -> Result<Response, StatusCode> {
     let db = db.deref().as_ref();
-    let password = req.password.clone().and_then(|password| Some(sha256::digest(password).to_ascii_uppercase()));
-    if let Some(password) = &password { if password.len() < 6 { return Err(StatusCode::BAD_REQUEST) } }
+    if req.password.len() < 6 { return Err(StatusCode::BAD_REQUEST) }
+    let password = sha256::digest(req.password.clone()).to_ascii_uppercase();
     match queries::accounts::register(req.login.to_lowercase(), password, req.display_name.clone())
         .exec(db)
         .await
@@ -69,7 +69,7 @@ struct Login {
 #[handler]
 pub async fn login(req: Json<Login>, db: Data<&Arc<DatabaseConnection>>) -> Result<Response, StatusCode> {
     let db = db.deref().as_ref();
-    start_session(db, req.login.clone(), Some(req.password.clone())).await
+    start_session(db, req.login.clone(), req.password.clone()).await
 }
 
 #[derive(Debug, Deserialize)]

@@ -9,7 +9,8 @@ use serde::{ser::SerializeStruct, Serialize};
 use player::Player;
 use crate::{gateway::{ events::TableEvents, payloads::Payload }, runtime_storage::{ DataTable, SharedTable }};
 use futures::executor;
-use super::gameplay::Game;
+use super::gameplay::{self, Game};
+use crate::game::gameplay::Ok;
 
 #[derive(Debug, Serialize)]
 pub enum Error<'a> {
@@ -17,8 +18,10 @@ pub enum Error<'a> {
     BadArgument(&'a str),
     Forbidden(&'a str),
     CantAssignNewOwner,
+    NoGame,
     GameAlreadyStarted,
     Full,
+    Game(gameplay::Error)
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +169,7 @@ impl<'a, 'b> Room
     pub async fn player_switch_ready(&'a self, player_id: Uuid) -> Result<(), Error<'b>> {
         let mut players = self.players.write().await;
         players.shared_update(&player_id, |player| {
+            eprintln!("{:?}", player);
             player.is_ready = !player.is_ready;
             eprintln!("{:?}", player);
             Ok::<(), ()>(())
@@ -178,13 +182,39 @@ impl<'a, 'b> Room
         match self.game {
             Some(_) => Err(Error::GameAlreadyStarted),
             None => { 
-                let game_obj = Game::new(self.players.read().await.deref().deref().clone());
+                let game_obj = Game::new(self.players.read().await.deref().deref().clone())
+                    .map_err(|e| Error::Game(e))?;
                 self.game = Some(Arc::new(RwLock::new(game_obj.clone())));
                 let game = self.game.as_ref().unwrap().read().await;
                 game.announce(Payload::GameStarted(game_obj).to_json_string());
                 game.announce_turn();
                 Ok(())
             }
+        }
+    }
+
+    pub async fn play_game(&'a self, player_id: Uuid, card_id: Option<usize>) -> Result<Ok, Error<'b>> {
+        match &self.game {
+            Some(game) => {
+                let mut game =game.write().await;
+                let result = game.play(player_id, card_id).map_err(|e| Error::Game(e))?;
+                match result {
+                    Ok::GameOver(ref players ) => {
+                        let mut room_players = self.players.write().await;
+                        for player in players.iter() {
+                            let (id, points) = player.get();
+                            let _ = room_players.shared_update(&id, |player| {
+                                player.points += points;
+                                Ok::<(), ()>(())
+                            });
+                        };
+                        self.announce(Payload::GameOver(players.clone()).to_json_string());
+                    },
+                    _ => {},
+                };
+                Ok(result)
+            },
+            None => Err(Error::NoGame),
         }
     }
 }

@@ -17,7 +17,7 @@ pub fn by_uuid_or_login(uuid_or_login: String) -> Select<Accounts> {
     )
 }
 
-pub fn register(id: String, password: Option<String>, display_name: Option<String>) -> TryInsert<accounts::ActiveModel> {
+pub fn register(id: String, password: String, display_name: Option<String>) -> TryInsert<accounts::ActiveModel> {
     Accounts::insert(
         accounts::ActiveModel {
             login: Set(id.clone()),

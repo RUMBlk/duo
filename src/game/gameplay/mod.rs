@@ -6,10 +6,16 @@ use sea_orm::prelude::Uuid;
 use serde::Serialize;
 use crate::{game::rooms, gateway::payloads::Payload};
 use card::{ Card, Element, Effect };
-use player::Player;
+use player::*;
 
-#[derive(Debug)]
+pub enum Ok {
+    Ok,
+    GameOver(Losers),
+}
+
+#[derive(Debug, Serialize)]
 pub enum Error {
+    NotEnoughPlayers,
     CardNotFound,
     PlayerNotFound,
     WrongTurn,
@@ -42,31 +48,34 @@ pub struct Game {
     turn: usize,
     direction: Direction,
     #[serde(skip)]
-    losers: u8,
+    losers: Vec<Loser>,
 }
 
 impl Game {
-    pub fn new(players: HashSet<rooms::player::Player>) -> Self {
+    pub fn new(players: HashSet<rooms::player::Player>) -> Result<Self, Error> {
         let mut cards: Vec<Card> = Vec::new();
         for _i in 0..players.len()*8*3 {
             cards.push(rand::random())
         }
         let mut players_new = Vec::new();
-        for player in players.into_iter() {
+        for player in players.into_iter().filter(|player| player.is_ready == true) {
             let mut player: Player = player.into();
             for _i in 0..8 {
                 player.cards.push(rand::random())
             }
             players_new.push(player)
         };
-        Self {
-            card: Card::new(Element::Energy, Effect::Flow),
-            cards,
-            players: players_new,
-            turn: 0,
-            direction: Direction::Next,
-            losers: 0,
-        }
+        if players_new.len() < 2 { return Err(Error::NotEnoughPlayers) }
+        Ok(
+            Self {
+                card: Card::new(Element::Energy, Effect::Flow),
+                cards,
+                players: players_new,
+                turn: 0,
+                direction: Direction::Next,
+                losers: Vec::new(),
+            }
+        )
     }
 
 
@@ -97,7 +106,7 @@ impl Game {
             .map(|player| player.0)
     }
 
-    pub fn play(&mut self, player_id: Uuid, card_id: Option<usize>) -> Result<(), Error> {
+    pub fn play(&mut self, player_id: Uuid, card_id: Option<usize>) -> Result<Ok, Error> {
         let mut step = 1;
         let index = self.get_player_index(player_id)?;
         if index != self.turn { return Err(Error::WrongTurn) }
@@ -120,9 +129,9 @@ impl Game {
         } else {
             let num_of_cards = player.cards.len();
             if let Err(Error::NoCardsLeft) = self.pick_card(index) {
-                if num_of_cards == 0 { 
-                    self.losers += 1;
-                    self.players[index].set_place(self.losers);
+                if num_of_cards == 0 {
+                    self.losers.push(self.players[index].clone().into()); 
+                    self.players.remove(index);
                 }
             }
         }
@@ -138,7 +147,13 @@ impl Game {
             self.turn = turn as usize;
         }
         self.announce_turn();
-        Ok(())
+        if self.players.len() <= 1 { 
+            if let Some(winner) = self.players.pop() {
+                self.losers.push(winner.into());
+            }
+            return Ok(Ok::GameOver(self.losers.clone().into())) 
+        }
+        Ok(Ok::Ok)
     }
 
     pub fn pick_card(&mut self, player_index: usize) -> Result<(), Error> {

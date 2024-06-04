@@ -186,6 +186,7 @@ pub async fn leave(
     if let Err(rooms::Error::CantAssignNewOwner) = leave {
         rooms.remove(&room.clone());
     } else if let Ok(true) = leave {
+        eprintln!("{:?}", room.clone());
         rooms.replace(room);
     } else {
         leave.map_err(|_| StatusCode::FORBIDDEN)?;

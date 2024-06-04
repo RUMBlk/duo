@@ -5,8 +5,9 @@ use tokio::sync::RwLock;
 use std::{ ops::Deref, sync::Arc };
 use crate::Rooms;
 use super::prelude;
-use crate::runtime_storage::Table;
+use crate::runtime_storage::{ Table, SharedTable };
 use futures::executor;
+use crate::game::gameplay::Ok;
 
 #[handler]
 pub async fn get(
@@ -60,9 +61,14 @@ pub async fn play(
     rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
 ) -> Result<StatusCode, StatusCode> {
     let db = db.deref().as_ref();
-    let (_players, rooms, player) =
+    let (mut players, mut rooms, mut player) =
         prelude(db, req.header("authorization"), players_ptr.deref(), rooms_ptr.deref()).await?;
-    let mut game = rooms.get(&id).ok_or(StatusCode::NOT_FOUND)?.game.as_ref().ok_or(StatusCode::NO_CONTENT)?.write().await;
-    game.play(*player.uuid(), card_id).map_err(|e| { eprintln!("{:?}", e); StatusCode::PRECONDITION_FAILED } )?;
+    let room = rooms.get(&id).ok_or(StatusCode::NOT_FOUND)?;
+    match room.play_game(*player.uuid(), card_id).await.map_err(|e| { eprintln!("{:?}", e); StatusCode::PRECONDITION_FAILED } )? {
+        Ok::GameOver(players) => {
+            //Implement upload to the Database
+        },
+        _ => {},
+    }
     Ok(StatusCode::OK)
 }

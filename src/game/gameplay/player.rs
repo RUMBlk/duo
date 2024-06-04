@@ -1,6 +1,6 @@
 use sea_orm::prelude::Uuid;
 use serde::{ser::SerializeStruct, Serialize};
-use std::{ borrow::Borrow, hash::Hash };
+use std::{ borrow::Borrow, hash::Hash, ops::Deref };
 use tokio::sync::broadcast::Sender;
 use super::card::Card;
 use crate::game::rooms;
@@ -10,22 +10,12 @@ pub struct Player {
     id: Uuid,
     pub sender: Sender<String>,
     pub cards: Vec<Card>,
-    place: u8,
 }
 
 impl Player {
     pub fn id(&self) -> &Uuid {
         &self.id
     }
-
-    pub fn place(&self) -> &u8 {
-        &self.place
-    }
-
-    pub fn set_place(&mut self, place: u8) -> &Self {
-        self.place = place;
-        self
-    } 
 }
 
 impl From<rooms::player::Player> for Player {
@@ -38,7 +28,6 @@ impl From<rooms::player::Player> for Player {
             id: value.id,
             sender: value.sender,
             cards: Vec::new(),
-            place: 0
         }
     }
 }
@@ -70,5 +59,51 @@ impl Serialize for Player {
         state.serialize_field("id", &self.id)?;
         state.serialize_field("cards", &self.cards.len())?;
         state.end()
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Loser {
+    id: Uuid,
+    points: u64,
+}
+
+impl Loser {
+    pub fn new(id: Uuid) -> Self {
+        Self { id, points: 0 }
+    }
+
+    pub fn get(&self) -> (Uuid, u64) {
+        (self.id, self.points)
+    }
+}
+
+impl From<Player> for Loser {
+    fn from(value: Player) -> Self {
+        Self { id: value.id, points: 0 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Losers(Vec<Loser>);
+
+impl From<Vec<Loser>> for Losers {
+    fn from(value: Vec<Loser>) -> Self {
+        let len = value.len();
+        let mut losers = Vec::new();
+        for (i, loser) in value.iter().enumerate() {
+            let mut loser = loser.clone();
+            loser.points = ((len*10)*i/len) as u64;
+            losers.push(loser);
+        }
+        Self(losers)
+    }
+}
+
+impl Deref for Losers {
+    type Target = Vec<Loser>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
