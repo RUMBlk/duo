@@ -39,8 +39,13 @@ where T: Eq + PartialEq + Hash + TableEvents + Clone {
     }
 
     fn replace(&mut self, value: T) -> Option<T> {
-        let record = self.0.replace(value);
-        if let Some(ref record) = record { record.update() };
+        let record = self.0.replace(value.clone());
+        if record.is_some() {
+            value.update()
+        }
+        else {
+            value.insert()
+        }
         record
     }
 
