@@ -2,11 +2,12 @@ use poem::{
     handler, http::StatusCode, web::{
         Data, Json, Path
     },
+    Response,
 };
 use sea_orm::DatabaseConnection;
 use std::{ops::Deref, sync::Arc};
 use crate::database::{self, entities::accounts, queries};
-use serde::{Serialize, ser::SerializeStruct};
+use serde::{ser::SerializeStruct, Serialize};
 
 struct User(pub database::entities::accounts::Model);
 
@@ -23,7 +24,7 @@ impl Serialize for User {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct UserStat {
     games_played: i64,
     points: i64,
@@ -58,12 +59,12 @@ pub async fn get(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> 
 }
 
 #[handler]
-pub async fn get_full(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> Result<Json<UserStat>, StatusCode> {
+pub async fn get_full(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> Result<Response, StatusCode> {
     let db = db.deref().as_ref();
-    let user = queries::accounts::by_uuid_or_login(id.clone())
+    let user: UserStat = queries::accounts::by_uuid_or_login(id.clone())
         .one(db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?.into();
-    Ok(Json(user))
+    Ok(Response::builder().body(serde_json::to_string(&user).expect("Failed to serialize UserStat")))
 }
