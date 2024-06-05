@@ -61,7 +61,7 @@ impl Game {
         for player in players.into_iter().filter(|player| player.is_ready == true) {
             let mut player: Player = player.into();
             for _i in 0..8 {
-                player.cards.push(rand::random())
+                player.add_card(rand::random())
             }
             players_new.push(player)
         };
@@ -93,7 +93,7 @@ impl Game {
         tokio::spawn(async move {
             for player in game.players.iter() {
                 let _ = player.sender.send(Payload::GameNewTurn(game.clone()).to_json_string());
-                let cards = player.cards.clone();
+                let cards = player.cards().clone();
                 let _ = player.sender.send(Payload::GamePlayerCards(cards).to_json_string());
             }
         });
@@ -112,10 +112,10 @@ impl Game {
         if index != self.turn { return Err(Error::WrongTurn) }
         let player = &mut self.players[index];
         if let Some(card_id) = card_id {
-            let card = player.cards.get(card_id).ok_or(Error::CardNotFound)?;
+            let card = player.get_card(card_id).ok_or(Error::CardNotFound)?;
             let effect = card.play(self.card.clone()).map_err(|_| Error::WrongCard)?;
             self.card = card.clone();
-            player.cards.remove(card_id);
+            player.remove_card(card_id);
             match effect {
                 Effect::Stun => { step += 1 },
                 Effect::Flow => { self.direction.switch(); },
@@ -127,7 +127,7 @@ impl Game {
                 _ => {},
             }
         } else {
-            let num_of_cards = player.cards.len();
+            let num_of_cards = player.cards().len();
             if let Err(Error::NoCardsLeft) = self.pick_card(index) {
                 if num_of_cards == 0 {
                     self.losers.push(self.players[index].clone().into()); 
@@ -159,7 +159,7 @@ impl Game {
     pub fn pick_card(&mut self, player_index: usize) -> Result<(), Error> {
         let player = self.players.get_mut(player_index).ok_or(Error::PlayerNotFound)?;
         let card = self.cards.pop().ok_or(Error::NoCardsLeft)?;
-        player.cards.push(card);
+        player.add_card(card);
         Ok(())
     }
 }

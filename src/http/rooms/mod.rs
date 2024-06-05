@@ -5,11 +5,13 @@ use sea_orm::{ prelude::Uuid, DatabaseConnection };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{ RwLock, RwLockWriteGuard};
 use std::{ ops::Deref, sync::Arc };
-use crate::game::rooms::{self, Room};
-use crate::{game::rooms::Partial, Rooms};
-use crate::database::queries;
-use crate::gateway::sessions::User;
-use crate::runtime_storage::Table;
+use crate::{ 
+    Rooms,
+    game::rooms::{self, Room, Partial},
+    database::queries,
+    gateway::sessions::User,
+    runtime_storage::Table,
+};
 
 async fn prelude<'a>(
     db: &'a DatabaseConnection,
@@ -186,7 +188,6 @@ pub async fn leave(
     if let Err(rooms::Error::CantAssignNewOwner) = leave {
         rooms.remove(&room.clone());
     } else if let Ok(true) = leave {
-        eprintln!("{:?}", room.clone());
         rooms.replace(room);
     } else {
         leave.map_err(|_| StatusCode::FORBIDDEN)?;

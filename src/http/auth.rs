@@ -1,11 +1,12 @@
+use futures::TryFutureExt;
 use poem::{
     handler, http::StatusCode, web::{
         Data, Json
-    }, Response,
+    }, Request, Response
 };
 use sea_orm::{prelude::Uuid, DatabaseConnection, DbErr, TryInsertResult};
 use std::{ops::Deref, sync::Arc};
-use crate::database::queries;
+use crate::database::queries::{self, sessions::{delete, delete_all_of_account }};
 use sha256;
 use serde::Deserialize;
 
@@ -70,6 +71,23 @@ struct Login {
 pub async fn login(req: Json<Login>, db: Data<&Arc<DatabaseConnection>>) -> Result<Response, StatusCode> {
     let db = db.deref().as_ref();
     start_session(db, req.login.clone(), req.password.clone()).await
+}
+
+#[handler]
+pub async fn logout(req: &Request, db: Data<&Arc<DatabaseConnection>>) -> Result<StatusCode, StatusCode> {
+    let db = db.deref().as_ref();
+    let token = req.header("authorization").ok_or(StatusCode::UNAUTHORIZED)?;
+    delete(db, token.to_string()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR).await?;
+    Ok(StatusCode::OK)
+}
+
+#[handler]
+pub async fn logout_all(req: &Request, db: Data<&Arc<DatabaseConnection>>) -> Result<StatusCode, StatusCode> {
+    let db = db.deref().as_ref();
+    let token = Uuid::parse_str(req.header("authorization").ok_or(StatusCode::UNAUTHORIZED)?)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    delete_all_of_account(db, token).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR).await?;
+    Ok(StatusCode::OK)
 }
 
 #[derive(Debug, Deserialize)]

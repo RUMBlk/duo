@@ -1,14 +1,16 @@
 use poem::{handler, http::StatusCode, web::{ Data, Path }, Request, Response };
-use sea_orm::prelude::DatabaseConnection;
+use sea_orm::{prelude::DatabaseConnection, Set};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 use std::{ ops::Deref, sync::Arc };
-use crate::Rooms;
+use crate::{ 
+    Rooms,
+    runtime_storage::Table,
+    game::gameplay::Ok,
+    database::queries::accounts,
+};
 use super::prelude;
-use crate::runtime_storage::{ Table, SharedTable };
 use futures::executor;
-use crate::game::gameplay::Ok;
-
 #[handler]
 pub async fn get(
     Path(id): Path<String>,
@@ -61,12 +63,25 @@ pub async fn play(
     rooms_ptr: Data<&Arc<RwLock<Rooms>>>,
 ) -> Result<StatusCode, StatusCode> {
     let db = db.deref().as_ref();
-    let (mut players, mut rooms, mut player) =
+    let (_players, mut rooms, mut player) =
         prelude(db, req.header("authorization"), players_ptr.deref(), rooms_ptr.deref()).await?;
     let room = rooms.get(&id).ok_or(StatusCode::NOT_FOUND)?;
-    match room.play_game(*player.uuid(), card_id).await.map_err(|e| { eprintln!("{:?}", e); StatusCode::PRECONDITION_FAILED } )? {
+    match room.play_game(*player.uuid(), card_id).await.map_err(|_e| { StatusCode::PRECONDITION_FAILED } )? {
         Ok::GameOver(players) => {
             //Implement upload to the Database
+            for (index, player) in players.iter().enumerate() {
+                let _ = accounts::update(db, id.to_string(), |values, account| {
+                    account.games_played = Set(values.games_played + 1);
+                    if index <= players.len() / 2 {
+                        account.wins = Set(values.wins + 1);    
+                    } else {
+                        account.loses = Set(values.loses + 1);
+                    }
+                    account.cards_had = Set(values.cards_had + *player.cards_had() as i64);
+                    account.points = Set(values.points + *player.points() as i64);
+                    account.max_points = Set(values.max_points.max(*player.points() as i16))
+                }).await;
+            }
         },
         _ => {},
     }

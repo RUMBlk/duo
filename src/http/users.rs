@@ -5,7 +5,7 @@ use poem::{
 };
 use sea_orm::DatabaseConnection;
 use std::{ops::Deref, sync::Arc};
-use crate::database::{self, queries};
+use crate::database::{self, entities::accounts, queries};
 use serde::{Serialize, ser::SerializeStruct};
 
 struct User(pub database::entities::accounts::Model);
@@ -23,6 +23,29 @@ impl Serialize for User {
     }
 }
 
+#[derive(Serialize)]
+struct UserStat {
+    games_played: i64,
+    points: i64,
+    cards_had: i64,
+    wins: i32,
+    loses: i32,
+    max_points: i16,
+}
+
+impl From<accounts::Model> for UserStat {
+    fn from(value: accounts::Model) -> Self {
+        Self {
+            games_played: value.games_played,
+            points: value.games_played,
+            cards_had: value.cards_had,
+            wins: value.wins,
+            loses: value.loses,
+            max_points: value.max_points,
+        }
+    }
+}
+
 #[handler]
 pub async fn get(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> Result<Json<User>, StatusCode> {
     let db = db.deref().as_ref();
@@ -31,5 +54,16 @@ pub async fn get(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> 
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?);
+    Ok(Json(user))
+}
+
+#[handler]
+pub async fn get_full(Path(id): Path<String>, db: Data<&Arc<DatabaseConnection>>) -> Result<Json<UserStat>, StatusCode> {
+    let db = db.deref().as_ref();
+    let user = queries::accounts::by_uuid_or_login(id.clone())
+        .one(db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?.into();
     Ok(Json(user))
 }

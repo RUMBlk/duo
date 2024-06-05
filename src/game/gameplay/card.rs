@@ -100,7 +100,7 @@ impl Card {
 }
 
 impl Distribution<Card> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Card {
+    fn sample<R: Rng + ?Sized>(&self, _rng: &mut R) -> Card {
         Card {
             element: rand::random(),
             effect: rand::random(), 

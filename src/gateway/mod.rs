@@ -13,8 +13,7 @@ use tokio::sync::{ broadcast, RwLock };
 use tokio::time::sleep;
 use futures_util::StreamExt;
 use payloads::*;
-use crate::game::rooms;
-use crate::runtime_storage::Table;
+use crate::{game::rooms, runtime_storage::Table};
 
 fn unwrap_event(event: Result<Payload, Error>) -> Payload {
     match event {

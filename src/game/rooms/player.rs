@@ -2,8 +2,7 @@ use std::{borrow::Borrow, hash::Hash};
 use serde::Serialize;
 use sea_orm::prelude::Uuid;
 use tokio::sync::broadcast::Sender;
-use crate::gateway::events::SharedTableEvents;
-use crate::gateway::payloads::Payload;
+use crate::{ gateway::events::SharedTableEvents, gateway::payloads::Payload };
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Player {

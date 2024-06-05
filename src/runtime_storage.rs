@@ -1,7 +1,11 @@
 use serde::Serialize;
 use crate::gateway::events::{SharedTableEvents, TableEvents};
-use std::{borrow::Borrow, collections::HashSet, ops::Deref};
-use std::hash::Hash;
+use std::{
+    borrow::Borrow,
+    collections::HashSet,
+    ops::Deref,
+    hash::Hash,
+};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct DataTable<T>(pub HashSet<T>);

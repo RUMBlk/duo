@@ -1,16 +1,18 @@
 pub mod player;
 
-use std::{borrow::Borrow, hash::Hash, ops::Deref};
+use std::{borrow::Borrow, hash::Hash, ops::Deref, sync::Arc};
 use sea_orm::prelude::Uuid;
 use tokio::sync::{ RwLock, broadcast::Sender };
-use std::sync::Arc;
 use random_string;
 use serde::{ser::SerializeStruct, Serialize};
 use player::Player;
-use crate::{gateway::{ events::TableEvents, payloads::Payload }, runtime_storage::{ DataTable, SharedTable }};
+use crate::{
+    gateway::{ events::TableEvents, payloads::Payload },
+    runtime_storage::{ DataTable, SharedTable },
+    game::gameplay::Ok,
+};
 use futures::executor;
 use super::gameplay::{self, Game};
-use crate::game::gameplay::Ok;
 
 #[derive(Debug, Serialize)]
 pub enum Error<'a> {
@@ -169,12 +171,9 @@ impl<'a, 'b> Room
     pub async fn player_switch_ready(&'a self, player_id: Uuid) -> Result<(), Error<'b>> {
         let mut players = self.players.write().await;
         players.shared_update(&player_id, |player| {
-            eprintln!("{:?}", player);
             player.is_ready = !player.is_ready;
-            eprintln!("{:?}", player);
             Ok::<(), ()>(())
         }).unwrap_or(None).ok_or(Error::PlayerNotInRoom)?;
-        eprintln!("{:?}", players.get(&player_id));
         Ok(())
     }
 
@@ -201,10 +200,9 @@ impl<'a, 'b> Room
                 match result {
                     Ok::GameOver(ref players ) => {
                         let mut room_players = self.players.write().await;
-                        for player in players.iter() {
-                            let (id, points) = player.get();
-                            let _ = room_players.shared_update(&id, |player| {
-                                player.points += points;
+                        for loser in players.iter() {
+                            let _ = room_players.shared_update(loser.id(), |player| {
+                                player.points += loser.points();
                                 Ok::<(), ()>(())
                             });
                         };

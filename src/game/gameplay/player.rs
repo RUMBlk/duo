@@ -9,25 +9,44 @@ use crate::game::rooms;
 pub struct Player {
     id: Uuid,
     pub sender: Sender<String>,
-    pub cards: Vec<Card>,
+    cards: Vec<Card>,
+    cards_count: u16,
 }
 
 impl Player {
     pub fn id(&self) -> &Uuid {
         &self.id
     }
+
+    pub fn add_card(&mut self, card: Card) {
+        self.cards.push(card);
+        self.cards_count += 1;
+    }
+
+    pub fn remove_card(&mut self, index: usize) -> Card {
+        self.cards.remove(index)
+    }
+
+    pub fn get_card(&self, index: usize) -> Option<&Card> {
+        self.cards.get(index)
+    }
+
+    pub fn cards(&self) -> &Vec<Card> {
+        &self.cards
+    }
 }
 
 impl From<rooms::player::Player> for Player {
     fn from(value: rooms::player::Player) -> Self {
         let mut cards: Vec<Card> = Vec::new();
-        for i in 0..8 {
+        for _i in 0..8 {
             cards.push(rand::random());
         }
         Self {
             id: value.id,
             sender: value.sender,
             cards: Vec::new(),
+            cards_count: 0,
         }
     }
 }
@@ -66,21 +85,30 @@ impl Serialize for Player {
 pub struct Loser {
     id: Uuid,
     points: u64,
+    cards_had: u16,
 }
 
 impl Loser {
     pub fn new(id: Uuid) -> Self {
-        Self { id, points: 0 }
+        Self { id, points: 0, cards_had: 0 }
     }
 
-    pub fn get(&self) -> (Uuid, u64) {
-        (self.id, self.points)
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    pub fn points(&self) -> &u64 {
+        &self.points
+    }
+
+    pub fn cards_had(&self) -> &u16 {
+        &self.cards_had
     }
 }
 
 impl From<Player> for Loser {
     fn from(value: Player) -> Self {
-        Self { id: value.id, points: 0 }
+        Self { id: value.id, points: 0, cards_had: value.cards_count }
     }
 }
 

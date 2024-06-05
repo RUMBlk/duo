@@ -1,5 +1,5 @@
 
-use sea_orm::{prelude::Uuid, Select, ColumnTrait, Condition, TryInsert, EntityTrait, QueryFilter, Set};
+use sea_orm::{prelude::Uuid, ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter, Select, Set, TryInsert};
 use crate::database::entities::{ accounts, prelude::Accounts };
 
 pub fn by_uuid(uuid: Uuid) -> Select<Accounts> {
@@ -28,4 +28,13 @@ pub fn register(id: String, password: String, display_name: Option<String>) -> T
     )
     .on_conflict(sea_orm::sea_query::OnConflict::column(accounts::Column::Id).do_nothing().to_owned())
     .do_nothing()
+}
+
+pub async fn update<F>(db: &DatabaseConnection, id: String, func: F) -> Result<bool, DbErr>
+where F: FnOnce(&accounts::Model, &mut accounts::ActiveModel) {
+    let Some(model) = by_uuid_or_login(id).one(db).await? else { return Ok(false) };
+    let mut active_model = model.clone().into_active_model();
+    func(&model, &mut active_model);
+    active_model.save(db).await?;
+    Ok(true)
 }
