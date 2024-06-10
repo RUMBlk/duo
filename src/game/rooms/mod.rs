@@ -188,7 +188,7 @@ impl<'a, 'b> Room
         if let Some(game) = &self.game {
             let mut game = game.write().await;
             game.player_update_sender(player_id, sender.clone());
-            let _ = sender.send(Payload::GameNewTurn(game.clone()).to_json_string());
+            let _ = sender.send(Payload::GameStarted(game.clone()).to_json_string());
         }
         Ok(())
     }
