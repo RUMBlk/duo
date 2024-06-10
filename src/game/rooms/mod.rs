@@ -184,9 +184,11 @@ impl<'a, 'b> Room
             Ok::<(), ()>(())
         }).unwrap_or(None).ok_or(Error::PlayerNotInRoom)?;
         drop(players);
+        let _ = sender.send(Payload::RoomCreate(self.clone()).to_json_string());
         if let Some(game) = &self.game {
             let mut game = game.write().await;
-            game.player_update_sender(player_id, sender);
+            game.player_update_sender(player_id, sender.clone());
+            let _ = sender.send(Payload::GameNewTurn(game.clone()).to_json_string());
         }
         Ok(())
     }
@@ -200,7 +202,6 @@ impl<'a, 'b> Room
                 self.game = Some(Arc::new(RwLock::new(game_obj.clone())));
                 let game = self.game.as_ref().unwrap().read().await;
                 game.announce(Payload::GameStarted(game_obj).to_json_string());
-                game.announce_turn();
                 Ok(())
             }
         }

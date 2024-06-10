@@ -1,7 +1,7 @@
 
 use sea_orm::{prelude::Uuid, DatabaseConnection };
 use std::sync::Arc;
-use crate::{ database::queries, runtime_storage::SharedTable };
+use crate::database::queries;
 use tokio::sync::{ broadcast::Sender, RwLock };
 use super::payloads::*;
 
@@ -24,11 +24,7 @@ pub async fn identify(
         player.set_sender(sender.clone());
         let rooms = rooms_ptr.read().await;
         if let Some(room) = player.room.as_ref().and_then(|room_id| rooms.get(room_id).cloned()) {
-            let _ = room.players().write().await.shared_update(&uuid, |player| {
-                player.sender = sender.clone();
-                Ok::<(), ()>(())
-            });
-            let _ = sender.send(Payload::RoomCreate(room.clone()).to_json_string());
+            let _ = room.player_update_sender(uuid, sender.clone()).await;
         }
         drop(rooms);
         player.to_owned()
