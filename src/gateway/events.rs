@@ -34,7 +34,7 @@ pub async fn identify(
         player.to_owned()
     } else {
         let account = queries::accounts::by_uuid(uuid).one(db).await
-            .map_err(|_| Error::InternalServerError)?
+            .map_err(|_| Error::InvalidToken)?
             .ok_or(Error::InvalidToken)?;
         let player = super::sessions::User::from_account(account, sender);
         player
