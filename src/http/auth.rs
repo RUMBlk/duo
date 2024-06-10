@@ -76,8 +76,9 @@ pub async fn login(req: Json<Login>, db: Data<&Arc<DatabaseConnection>>) -> Resu
 #[handler]
 pub async fn logout(req: &Request, db: Data<&Arc<DatabaseConnection>>) -> Result<StatusCode, StatusCode> {
     let db = db.deref().as_ref();
-    let token = req.header("authorization").ok_or(StatusCode::UNAUTHORIZED)?;
-    delete(db, token.to_string()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR).await?;
+    let token = Uuid::parse_str(req.header("authorization").ok_or(StatusCode::UNAUTHORIZED)?)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    delete(db, token).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR).await?;
     Ok(StatusCode::OK)
 }
 

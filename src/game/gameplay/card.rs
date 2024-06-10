@@ -22,14 +22,19 @@ impl Element {
     //self - current played card
     //other - previous played card
     pub fn coefficient(&self, other: Self) -> f32 {
-        if *self == Element::Energy { return 1.0 };
+        if *self == Element::Energy || other == Element::Energy { return 1.0 };
         let pos = self.index() as isize;
         let other_pos = other.index() as isize;
         let distance = if pos <= other_pos {
-            other_pos - pos
+            let mut distance = other_pos - pos; 
+            let half = (Element::Energy as isize - 1)/2;
+            if distance > half { distance += 1 }
+            else if distance == half { return 1.0 }
+            distance
         } else {
             Element::Energy.index() as isize + other_pos - pos
-        }+1;
+        };
+        if distance == 0 { return 1.0 }
         0.50 + (Element::Energy as isize - distance) as f32 / 4_f32
     }
 }
@@ -58,7 +63,7 @@ pub enum Effect {
 impl Distribution<Effect> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Effect {
         match rng.gen_range(0..=3) {
-            0 => Effect::Atk(rng.gen_range(0..=12)),
+            0 => Effect::Atk(rng.gen_range(1..=12)),
             1 => Effect::Flow,
             2 => Effect::Stun,
             _ => Effect::Add(rng.gen_range(1..=4)),

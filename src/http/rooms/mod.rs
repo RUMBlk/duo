@@ -24,9 +24,8 @@ async fn prelude<'a>(
         .ok_or(StatusCode::BAD_REQUEST)?
     ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let player_id = queries::sessions::get_account_uuid(auth).one(db).await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::FORBIDDEN)?;
+    let player_id = queries::sessions::handle(db, auth).await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let players = players_ptr.write().await;
     let player = players.get(&player_id).ok_or(StatusCode::FORBIDDEN)?.clone();

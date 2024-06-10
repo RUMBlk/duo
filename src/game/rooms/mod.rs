@@ -177,6 +177,20 @@ impl<'a, 'b> Room
         Ok(())
     }
 
+    pub async fn player_update_sender(&'a self, player_id: Uuid, sender: Sender<String>) -> Result<(), Error<'b>> {
+        let mut players = self.players.write().await;
+        players.shared_update(&player_id, |player| {
+            player.sender = sender.clone();
+            Ok::<(), ()>(())
+        }).unwrap_or(None).ok_or(Error::PlayerNotInRoom)?;
+        drop(players);
+        if let Some(game) = &self.game {
+            let mut game = game.write().await;
+            game.player_update_sender(player_id, sender);
+        }
+        Ok(())
+    }
+
     pub async fn start_game(&'a mut self) -> Result<(), Error<'b>> {
         match self.game {
             Some(_) => Err(Error::GameAlreadyStarted),
@@ -215,6 +229,7 @@ impl<'a, 'b> Room
             None => Err(Error::NoGame),
         }
     }
+
 }
 
 impl Serialize for Room {

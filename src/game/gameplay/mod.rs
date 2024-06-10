@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::{game::rooms, gateway::payloads::Payload};
 use card::{ Card, Element, Effect };
 use player::*;
+use tokio::sync::broadcast::Sender;
 
 pub enum Ok {
     Ok,
@@ -86,6 +87,14 @@ impl Game {
                 let _ = player.sender.send(content.clone());
             }
         });
+    }
+
+    pub fn player_update_sender(&mut self, player_id: Uuid, sender: Sender<String>) -> bool {
+        let Ok(index) = self.get_player_index(player_id) else { return false };
+        if let Some(player) = self.players.get_mut(index) {
+            player.sender = sender;
+            true
+        } else { false }
     }
 
     pub fn announce_turn(&self) {

@@ -16,9 +16,8 @@ pub async fn identify(
     store_in: &mut Option<Uuid>,
 ) -> Result<Payload, Error> {
     let token = Uuid::parse_str(payload.token().as_str()).map_err(|_| Error::BadToken)?;
-    let uuid = queries::sessions::get_account_uuid(token).one(db).await
-        .map_err(|_| Error::InternalServerError)?
-        .ok_or(Error::InvalidToken)?;
+    let uuid = queries::sessions::handle(db, token).await
+        .map_err(|_| Error::InternalServerError)?;
 
     let mut players = players_ptr.write().await;
     let player = if let Some(player) = players.get(&uuid).cloned().as_mut() {
