@@ -91,8 +91,11 @@ impl Game {
 
     pub fn player_update_sender(&mut self, player_id: Uuid, sender: Sender<String>) -> bool {
         let Ok(index) = self.get_player_index(player_id) else { return false };
+        let game = self.clone();
         if let Some(player) = self.players.get_mut(index) {
-            player.sender = sender;
+            player.sender = sender.clone();
+            let _ = sender.send(Payload::GameStarted(game.clone()).to_json_string());
+            let _ = sender.send(Payload::GamePlayerCards(player.cards().clone()).to_json_string());
             true
         } else { false }
     }
