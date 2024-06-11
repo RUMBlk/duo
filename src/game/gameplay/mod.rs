@@ -3,7 +3,7 @@ pub mod player;
 
 use std::collections::HashSet;
 use sea_orm::prelude::Uuid;
-use serde::Serialize;
+use serde::{ser::SerializeStruct, Serialize};
 use crate::{game::rooms, gateway::payloads::Payload};
 use card::{ Card, Element, Effect };
 use player::*;
@@ -40,15 +40,13 @@ impl Direction {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct Game {
     card: Card,
-    #[serde(skip)]
     cards: Vec<Card>,
     players: Vec<Player>,
     turn: usize,
     direction: Direction,
-    #[serde(skip)]
     losers: Vec<Loser>,
 }
 
@@ -173,5 +171,19 @@ impl Game {
         let card = self.cards.pop().ok_or(Error::NoCardsLeft)?;
         player.add_card(card);
         Ok(())
+    }
+}
+
+impl Serialize for Game {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        let mut state = serializer.serialize_struct("Game", 5)?;
+        state.serialize_field("card", &self.card)?;
+        state.serialize_field("cards", &self.card.len())?;
+        state.serialize_field("players", &self.players)?;
+        state.serialize_field("turn", &self.turn)?;
+        state.serialize_field("direction", &self.direction)?;
+        state.end()
     }
 }
