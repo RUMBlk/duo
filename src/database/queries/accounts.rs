@@ -30,9 +30,9 @@ pub fn register(id: String, password: String, display_name: Option<String>) -> T
     .do_nothing()
 }
 
-pub async fn update<F>(db: &DatabaseConnection, id: String, func: F) -> Result<bool, DbErr>
+pub async fn update<F>(db: &DatabaseConnection, id: Uuid, func: F) -> Result<bool, DbErr>
 where F: FnOnce(&accounts::Model, &mut accounts::ActiveModel) {
-    let Some(model) = by_uuid_or_login(id).one(db).await? else { return Ok(false) };
+    let Some(model) = by_uuid(id).one(db).await? else { return Ok(false) };
     let mut active_model = model.clone().into_active_model();
     func(&model, &mut active_model);
     active_model.save(db).await?;

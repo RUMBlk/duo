@@ -121,7 +121,7 @@ impl From<Vec<Loser>> for Losers {
         let mut losers = Vec::new();
         for (i, loser) in value.iter().enumerate() {
             let mut loser = loser.clone();
-            loser.points = ((len*10)*i/len) as u64;
+            loser.points = ((len*10)*(len-i)/len) as u64;
             losers.push(loser);
         }
         Self(losers)

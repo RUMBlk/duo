@@ -169,6 +169,7 @@ impl<'a, 'b> Room
     }
 
     pub async fn player_switch_ready(&'a self, player_id: Uuid) -> Result<(), Error<'b>> {
+        if self.game.is_some() { return Err(Error::GameAlreadyStarted); }
         let mut players = self.players.write().await;
         players.shared_update(&player_id, |player| {
             player.is_ready = !player.is_ready;
@@ -217,6 +218,7 @@ impl<'a, 'b> Room
                         let mut room_players = self.players.write().await;
                         for loser in players.iter() {
                             let _ = room_players.shared_update(loser.id(), |player| {
+                                player.is_ready = false;
                                 player.points += loser.points();
                                 Ok::<(), ()>(())
                             });

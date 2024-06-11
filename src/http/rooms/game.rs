@@ -70,7 +70,7 @@ pub async fn play(
         Ok::GameOver(players) => {
             //Implement upload to the Database
             for (index, player) in players.iter().enumerate() {
-                let _ = accounts::update(db, id.to_string(), |values, account| {
+                let _ = accounts::update(db, player.id().clone(), |values, account| {
                     account.games_played = Set(values.games_played + 1);
                     if index <= players.len() / 2 {
                         account.wins = Set(values.wins + 1);    

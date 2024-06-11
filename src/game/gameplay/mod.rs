@@ -43,7 +43,6 @@ impl Direction {
 #[derive(Debug, Clone)]
 pub struct Game {
     card: Card,
-    cards: Vec<Card>,
     players: Vec<Player>,
     turn: usize,
     direction: Direction,
@@ -52,14 +51,10 @@ pub struct Game {
 
 impl Game {
     pub fn new(players: HashSet<rooms::player::Player>) -> Result<Self, Error> {
-        let mut cards: Vec<Card> = Vec::new();
-        for _i in 0..players.len()*8*3 {
-            cards.push(rand::random())
-        }
         let mut players_new = Vec::new();
         for player in players.into_iter().filter(|player| player.is_ready == true) {
             let mut player: Player = player.into();
-            for _i in 0..8 {
+            for _i in 0..6 {
                 player.add_card(rand::random())
             }
             players_new.push(player)
@@ -68,7 +63,6 @@ impl Game {
         Ok(
             Self {
                 card: Card::new(Element::Energy, Effect::Flow),
-                cards,
                 players: players_new,
                 turn: 0,
                 direction: Direction::Next,
@@ -123,6 +117,7 @@ impl Game {
         let index = self.get_player_index(player_id)?;
         if index != self.turn { return Err(Error::WrongTurn) }
         let player = &mut self.players[index];
+        let mut cards_to_pick = 0;
         if let Some(card_id) = card_id {
             let card = player.get_card(card_id).ok_or(Error::CardNotFound)?;
             let effect = card.play(self.card.clone()).map_err(|_| Error::WrongCard)?;
@@ -132,20 +127,16 @@ impl Game {
                 Effect::Stun => { step += 1 },
                 Effect::Flow => { self.direction.switch(); },
                 Effect::Add(num) => { 
-                    for _i in 0..num {
-                        let _ = self.pick_card(self.turn+1);
-                    }
+                    cards_to_pick = num;
                 },
                 _ => {},
             }
-        } else {
-            let num_of_cards = player.cards().len();
-            if let Err(Error::NoCardsLeft) = self.pick_card(index) {
-                if num_of_cards == 0 {
-                    self.losers.push(self.players[index].clone().into()); 
-                    self.players.remove(index);
-                }
+            if player.cards().len() == 0 {
+                self.losers.push(self.players[index].clone().into()); 
+                self.players.remove(index);
             }
+        } else {
+            let _ = self.pick_card(index);
         }
         let turn = match self.direction {
             Direction::Next => self.turn as isize + step,
@@ -157,6 +148,9 @@ impl Game {
             self.turn = (turn - self.players.len() as isize) as usize;
         } else {
             self.turn = turn as usize;
+        }
+        for _i in 0..cards_to_pick {
+            let _ = self.pick_card(self.turn);
         }
         self.announce_turn(true);
         if self.players.len() <= 1 { 
@@ -170,8 +164,7 @@ impl Game {
 
     pub fn pick_card(&mut self, player_index: usize) -> Result<(), Error> {
         let player = self.players.get_mut(player_index).ok_or(Error::PlayerNotFound)?;
-        let card = self.cards.pop().ok_or(Error::NoCardsLeft)?;
-        player.add_card(card);
+        player.add_card(rand::random());
         Ok(())
     }
 }
@@ -180,9 +173,8 @@ impl Serialize for Game {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer {
-        let mut state = serializer.serialize_struct("Game", 5)?;
+        let mut state = serializer.serialize_struct("Game", 4)?;
         state.serialize_field("card", &self.card)?;
-        state.serialize_field("cards", &self.cards.len())?;
         state.serialize_field("players", &self.players)?;
         state.serialize_field("turn", &self.turn)?;
         state.serialize_field("direction", &self.direction)?;

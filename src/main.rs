@@ -60,6 +60,7 @@ async fn poem(#[shuttle_runtime::Secrets] secret_store: SecretStore) -> ShuttleP
             .at("/api/rooms/:id/ready", post(http::rooms::ready))
             .at("/api/rooms/:id/leave", post(http::rooms::leave))
             .at("/api/rooms/:id/game", get(http::rooms::game::get).post(http::rooms::game::start))
+            .at("/api/rooms/:id/game/play", post(http::rooms::game::play))
             .at("/api/rooms/:id/game/play/:card_id", post(http::rooms::game::play))
             .with(Cors::new().allow_origin_regex("*"))
             .with(AddData::new(Arc::new(db)))
