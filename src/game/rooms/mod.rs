@@ -201,6 +201,7 @@ impl<'a, 'b> Room
                 self.game = Some(Arc::new(RwLock::new(game_obj.clone())));
                 let game = self.game.as_ref().unwrap().read().await;
                 game.announce(Payload::GameStarted(game_obj).to_json_string());
+                game.announce_turn(false);
                 Ok(())
             }
         }

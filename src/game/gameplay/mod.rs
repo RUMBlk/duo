@@ -98,11 +98,13 @@ impl Game {
         } else { false }
     }
 
-    pub fn announce_turn(&self) {
+    pub fn announce_turn(&self, new_turn: bool) {
         let game = self.clone();
         tokio::spawn(async move {
             for player in game.players.iter() {
-                let _ = player.sender.send(Payload::GameNewTurn(game.clone()).to_json_string());
+                if new_turn == true {
+                    let _ = player.sender.send(Payload::GameNewTurn(game.clone()).to_json_string());
+                }
                 let cards = player.cards().clone();
                 let _ = player.sender.send(Payload::GamePlayerCards(cards).to_json_string());
             }
@@ -156,7 +158,7 @@ impl Game {
         } else {
             self.turn = turn as usize;
         }
-        self.announce_turn();
+        self.announce_turn(true);
         if self.players.len() <= 1 { 
             if let Some(winner) = self.players.pop() {
                 self.losers.push(winner.into());
@@ -180,7 +182,7 @@ impl Serialize for Game {
             S: serde::Serializer {
         let mut state = serializer.serialize_struct("Game", 5)?;
         state.serialize_field("card", &self.card)?;
-        state.serialize_field("cards", &self.card.len())?;
+        state.serialize_field("cards", &self.cards.len())?;
         state.serialize_field("players", &self.players)?;
         state.serialize_field("turn", &self.turn)?;
         state.serialize_field("direction", &self.direction)?;
