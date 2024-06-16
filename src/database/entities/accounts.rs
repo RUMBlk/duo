@@ -2,9 +2,20 @@
 
 use sea_orm::entity::prelude::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "accounts")]
-pub struct Model {
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)] //Включити до цієї структури автоматичну реалізацію вказаних ознак
+#[sea_orm(table_name = "accounts")] //Назва відповідної таблиці в базі даних, при компіляції додає до коду структуру ActiveModel,
+//що відтворює Model, але з типами даних оберненими в ActiveValue
+/*
+    pub struct ActiveModel {
+        pub id: ActiveValue<i64>,
+        pub created_at: ActiveValue<DateTime<FixedOffset>>,
+        pub uuid: ActiveValue<Uuid>,
+        pub login: ActiveValue<String>,
+        pub password: ActiveValue<String>,
+        /* … */
+    }
+*/
+pub struct Model { //Структура, що описує стовпці таблиці, атрибути вказують властивості стовпців в базі даних
     #[sea_orm(primary_key)]
     pub id: i64,
     pub created_at: DateTimeWithTimeZone,
@@ -25,7 +36,7 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
+pub enum Relation { //Список таблиць з якими ця таблиця має з'єднання
     #[sea_orm(has_many = "super::sessions::Entity")]
     Sessions,
 }
@@ -36,4 +47,4 @@ impl Related<super::sessions::Entity> for Entity {
     }
 }
 
-impl ActiveModelBehavior for ActiveModel {}
+impl ActiveModelBehavior for ActiveModel {} //Стандартна реалізація ActiveModelBehavior для ActiveModel

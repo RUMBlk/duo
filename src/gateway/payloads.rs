@@ -4,49 +4,49 @@ use serde_json;
 use crate::game::{self, gameplay::player::Losers};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Payload {
+pub enum Payload { //Список усих можливих подій
     //From Server
+    #[serde(skip_deserializing)] //Пропуск десеріалізації
+    Error(Error), //Подія помилки
     #[serde(skip_deserializing)]
-    Error(Error),
+    Hello(Hello), //Подія привітання
     #[serde(skip_deserializing)]
-    Hello(Hello),
+    RoomPlayerNew(game::rooms::player::Player), //Подія приєднання гравця до кімнати
     #[serde(skip_deserializing)]
-    RoomPlayerNew(game::rooms::player::Player),
+    RoomPlayerUpdate(game::rooms::player::Player), //Подія оновлення гравця кімнати
     #[serde(skip_deserializing)]
-    RoomPlayerUpdate(game::rooms::player::Player),
+    RoomPlayerLeft(Uuid), //Подія виходу гравця з кімнати
     #[serde(skip_deserializing)]
-    RoomPlayerLeft(Uuid),
+    RoomCreate(game::rooms::Room), //Подія створення нової кімнати
     #[serde(skip_deserializing)]
-    RoomCreate(game::rooms::Room),
+    RoomUpdate(game::rooms::Room), //Подія оновлення кімнати
     #[serde(skip_deserializing)]
-    RoomUpdate(game::rooms::Room),
+    RoomDelete(String), //Подія видалення кімнати
     #[serde(skip_deserializing)]
-    RoomDelete(String),
+    GameStarted(game::gameplay::Game), //Подія створення нової гри
     #[serde(skip_deserializing)]
-    GameStarted(game::gameplay::Game),
+    GameNewTurn(game::gameplay::Game), //Подія нового ходу гри
     #[serde(skip_deserializing)]
-    GameNewTurn(game::gameplay::Game),
+    GamePlayerCards(Vec<game::gameplay::card::Card>), //Подія оголошення карт відповідного гравця
     #[serde(skip_deserializing)]
-    GamePlayerCards(Vec<game::gameplay::card::Card>),
-    #[serde(skip_deserializing)]
-    GameOver(Losers),
+    GameOver(Losers), //Подія закінчення гри
     //From Server/Client
-    Identify(Identify),
+    Identify(Identify), //Подія ідентифікації та авторизації за токеном
     #[serde(skip_deserializing)]
-    Ready(super::sessions::User),
+    Ready(super::sessions::User), //Подія окінчення ідентифікації
     /*//From Client
     RoomJoin(RoomJoin),
     RoomLeave(String),*/
 }
 
 impl Payload {
-    pub fn to_json_string(&self) -> String {
+    pub fn to_json_string(&self) -> String { //серіалізація у рядок
         serde_json::to_string(self).expect("Failed to serialize Gateway Payload")
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Error {
+pub enum Error { //Список помилок
         BadRequest(String),
         Declined,
         BadToken,
@@ -57,7 +57,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Hello {
+pub struct Hello { //Структура, що описує подію привітання
     heartbeat_interval: u64, 
 }
 
@@ -68,12 +68,12 @@ impl Hello {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Identify {
+pub struct Identify { //Структура, що описує подію ідентифікації
     token: String,
 }
 
 impl Identify {
-    pub fn token(&self) -> String {
+    pub fn token(&self) -> String { //Геттер token
         self.token.clone()
     }
 }
