@@ -143,13 +143,6 @@ impl Game {
         } else {
             let _ = self.pick_card(index); //якщо не вказаний індекс карти, то взяти з колоди
         }
-        for _i in 0..cards_to_pick {
-            let next = self.turn + match self.direction {
-                Direction::Next => 1,
-                Direction::Previous => -1,
-            };
-            let _ = self.pick_card(next);
-        }
         let turn = match self.direction { //визначення хто ходить наступним за напрямком
             Direction::Next => self.turn as isize + step,
             Direction::Previous => self.turn as isize - step,
@@ -161,6 +154,9 @@ impl Game {
             self.turn = (turn - self.players.len() as isize) as usize;
         } else {
             self.turn = turn as usize;
+        }
+        for _i in 0..cards_to_pick {
+            let _ = self.pick_card(self.turn);
         }
         if self.players.len() <= 1 { //Якщо залишився тільки один гравець
             //то завершити гру 
