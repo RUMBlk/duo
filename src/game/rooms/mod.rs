@@ -63,7 +63,7 @@ impl<'a, 'b> Room
         room.is_public = is_public; //публічності,
         room.set_password(password.clone())?; //пароля,
         room.set_max_players(max_players)?; //макс. кільк. гравців,
-        room.join(password, owner.clone(), sender).await?; //приєднання створювача кімнати,
+        room.players.write().await.0.insert(Player::new(owner, sender));
         room.set_owner(owner.clone())?; //назначення його власником
         //при помилці будь-якого сеттера, створення завершиться помилкою, інакше метод повертає екземпляр
         Ok(room)
